@@ -519,7 +519,7 @@ def add_message_attachment(history, row_idx, file_path, is_user=True):
         elif file_extension == '.docx':
             content = extract_docx_text(path)
             file_type = "application/docx"
-        elif file_extension in ('.xls', '.xlsx'):
+        elif file_extension in ('.xls', '.xlsx', '.csv'):
             content = extract_xlsx_text(path)
             file_type = "application/vnd.ms-excel"
         elif file_extension == '.pptx':
@@ -611,15 +611,20 @@ def extract_docx_text(docx_path):
 
 
 def extract_xlsx_text(xlsx_path):
-    """Read all sheets in an Excel file and convert to Markdown"""
+    """Read sheets from Excel or CSV file and convert to Markdown"""
     try:
         import pandas as pd
-        xls = pd.ExcelFile(xlsx_path)
+        path = Path(xlsx_path)
         parts = []
-        for sheet in xls.sheet_names:
-            df = xls.parse(sheet)
-            parts.append(f"### {sheet}")
+        if path.suffix.lower() == '.csv':
+            df = pd.read_csv(path)
             parts.append(df.to_markdown(index=False))
+        else:
+            xls = pd.ExcelFile(path)
+            for sheet in xls.sheet_names:
+                df = xls.parse(sheet)
+                parts.append(f"### {sheet}")
+                parts.append(df.to_markdown(index=False))
         return "\n\n".join(parts)
     except Exception as e:
         logger.error(f"Error extracting text from Excel: {e}")
