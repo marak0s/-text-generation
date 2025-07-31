@@ -57,6 +57,7 @@ from modules import (
 )
 from modules.chat import generate_pfp_cache
 from modules.extensions import apply_extensions
+from modules import login
 from modules.LoRA import add_lora_to_model
 from modules.models import load_model, unload_model_if_idle
 from modules.models_settings import (
@@ -130,49 +131,54 @@ def create_interface():
 
     with gr.Blocks(css=css, analytics_enabled=False, title=title, theme=ui.theme) as shared.gradio['interface']:
 
-        # Interface state
-        shared.gradio['interface_state'] = gr.State({k: None for k in shared.input_elements})
+        login_block = gr.Column(visible=True)
+        interface_block = gr.Column(visible=False)
+        login.create_login_ui(login_block, interface_block)
 
-        # Audio notification
-        if Path("user_data/notification.mp3").exists():
-            shared.gradio['audio_notification'] = gr.Audio(interactive=False, value="user_data/notification.mp3", elem_id="audio_notification", visible=False)
+        with interface_block:
+            # Interface state
+            shared.gradio['interface_state'] = gr.State({k: None for k in shared.input_elements})
 
-        # Floating menus for saving/deleting files
-        ui_file_saving.create_ui()
+            # Audio notification
+            if Path("user_data/notification.mp3").exists():
+                shared.gradio['audio_notification'] = gr.Audio(interactive=False, value="user_data/notification.mp3", elem_id="audio_notification", visible=False)
 
-        # Temporary clipboard for saving files
-        shared.gradio['temporary_text'] = gr.Textbox(visible=False)
+            # Floating menus for saving/deleting files
+            ui_file_saving.create_ui()
 
-        # Chat tab
-        ui_chat.create_ui()
+            # Temporary clipboard for saving files
+            shared.gradio['temporary_text'] = gr.Textbox(visible=False)
 
-        # Notebook tab
-        with gr.Tab("Notebook", elem_id='notebook-parent-tab'):
-            ui_default.create_ui()
-            ui_notebook.create_ui()
+            # Chat tab
+            ui_chat.create_ui()
 
-        ui_parameters.create_ui()  # Parameters tab
-        ui_chat.create_character_settings_ui()  # Character tab
-        ui_model_menu.create_ui()  # Model tab
-        if not shared.args.portable:
-            training.create_ui()  # Training tab
-        ui_session.create_ui()  # Session tab
+            # Notebook tab
+            with gr.Tab("Notebook", elem_id='notebook-parent-tab'):
+                ui_default.create_ui()
+                ui_notebook.create_ui()
 
-        # Generation events
-        ui_chat.create_event_handlers()
-        ui_default.create_event_handlers()
-        ui_notebook.create_event_handlers()
+            ui_parameters.create_ui()  # Parameters tab
+            ui_chat.create_character_settings_ui()  # Character tab
+            ui_model_menu.create_ui()  # Model tab
+            if not shared.args.portable:
+                training.create_ui()  # Training tab
+            ui_session.create_ui()  # Session tab
 
-        # Other events
-        ui_file_saving.create_event_handlers()
-        ui_parameters.create_event_handlers()
-        ui_model_menu.create_event_handlers()
+            # Generation events
+            ui_chat.create_event_handlers()
+            ui_default.create_event_handlers()
+            ui_notebook.create_event_handlers()
 
-        # UI persistence events
-        ui.setup_auto_save()
+            # Other events
+            ui_file_saving.create_event_handlers()
+            ui_parameters.create_event_handlers()
+            ui_model_menu.create_event_handlers()
 
-        # Interface launch events
-        shared.gradio['interface'].load(
+            # UI persistence events
+            ui.setup_auto_save()
+
+            # Interface launch events
+            shared.gradio['interface'].load(
             None,
             gradio('show_controls'),
             None,
@@ -202,12 +208,12 @@ def create_interface():
                 {ui.show_controls_js}
                 toggle_controls(x);
             }}"""
-        )
+            )
 
-        shared.gradio['interface'].load(partial(ui.apply_interface_values, {}, use_persistent=True), None, gradio(ui.list_interface_input_elements()), show_progress=False)
+            shared.gradio['interface'].load(partial(ui.apply_interface_values, {}, use_persistent=True), None, gradio(ui.list_interface_input_elements()), show_progress=False)
 
-        extensions_module.create_extensions_tabs()  # Extensions tabs
-        extensions_module.create_extensions_block()  # Extensions block
+            extensions_module.create_extensions_tabs()  # Extensions tabs
+            extensions_module.create_extensions_block()  # Extensions block
 
     # Launch the interface
     shared.gradio['interface'].queue()
