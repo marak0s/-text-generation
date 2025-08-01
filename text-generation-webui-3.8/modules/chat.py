@@ -613,19 +613,8 @@ def extract_docx_text(docx_path):
 def extract_xlsx_text(xlsx_path):
     """Read sheets from Excel or CSV file and convert to Markdown"""
     try:
-        import pandas as pd
-        path = Path(xlsx_path)
-        parts = []
-        if path.suffix.lower() == '.csv':
-            df = pd.read_csv(path)
-            parts.append(df.to_markdown(index=False))
-        else:
-            xls = pd.ExcelFile(path)
-            for sheet in xls.sheet_names:
-                df = xls.parse(sheet)
-                parts.append(f"### {sheet}")
-                parts.append(df.to_markdown(index=False))
-        return "\n\n".join(parts)
+        from modules import dataset_tool
+        return dataset_tool.summarize_table(xlsx_path, max_rows=5)
     except Exception as e:
         logger.error(f"Error extracting text from Excel: {e}")
         return f"[Error extracting Excel text: {str(e)}]"

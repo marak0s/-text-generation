@@ -193,7 +193,7 @@ neutral_samplers = default_preset()
 
 # UI defaults
 settings = {
-    'show_controls': True,
+    'show_controls': False,
     'start_with': '',
     'mode': 'instruct',
     'chat_style': 'cai-chat',
