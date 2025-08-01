@@ -536,6 +536,7 @@ def add_message_attachment(history, row_idx, file_path, is_user=True):
             "name": filename,
             "type": file_type,
             "content": content,
+            "path": str(path),
         }
 
         history['metadata'][key]["attachments"].append(attachment)
@@ -634,6 +635,20 @@ def extract_pptx_text(pptx_path):
     except Exception as e:
         logger.error(f"Error extracting text from PPTX: {e}")
         return f"[Error extracting PPTX text: {str(e)}]"
+
+
+def run_pandas_on_attachment(history, filename, code):
+    """Execute pandas code using an attached Excel/CSV file."""
+    try:
+        from modules import dataset_tool
+        for meta in history.get('metadata', {}).values():
+            for att in meta.get('attachments', []):
+                if att.get('name') == filename and att.get('path'):
+                    return dataset_tool.execute_pandas_code(code, att['path'])
+    except Exception as e:
+        logger.error(f"Error executing pandas code: {e}")
+        return f"[Error executing pandas code: {e}]"
+
 
 
 def generate_search_query(user_message, state):

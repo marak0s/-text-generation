@@ -1,5 +1,13 @@
+"""Utilities for summarizing tables and running pandas analysis."""
+
 import pandas as pd
 from pathlib import Path
+
+__all__ = [
+    "summarize_table",
+    "answer_question_with_pandas",
+    "execute_pandas_code",
+]
 
 
 def summarize_table(file_path: str, max_rows: int = 5) -> str:
