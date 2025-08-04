@@ -58,6 +58,8 @@ def summarize_table(file_path: str, max_rows: int = 5, cell_limit: int = 80) -> 
     if pd is None:
         return '[pandas not installed]'
     path = Path(file_path)
+    # Register the table so ``get_table_path`` can resolve it later
+    register_table(path)
     parts = [f"Table: {path.name}"]
     suffix = path.suffix.lower()
 
@@ -80,11 +82,16 @@ def summarize_table(file_path: str, max_rows: int = 5, cell_limit: int = 80) -> 
         else:
             uniques = {}
         if df is None:
-            df = pd.read_csv(path, nrows=max_rows, dtype=str)
+            df = pd.read_csv(path, nrows=max_rows, low_memory=False)
+            types = df.dtypes.astype(str).to_dict()
+            df = df.astype(str)
             try:
                 uniques = _count_uniques_csv(path, df.columns)
             except Exception:
                 uniques = {}
+        else:
+            types = df.dtypes.astype(str).to_dict()
+            df = df.astype(str)
         try:
             with open(path, 'r', encoding='utf-8', errors='ignore') as fh:
                 row_count = sum(1 for _ in fh) - 1
@@ -93,6 +100,7 @@ def summarize_table(file_path: str, max_rows: int = 5, cell_limit: int = 80) -> 
         df = _truncate_frame(df, cell_limit)
         columns = ', '.join(str(c) for c in df.columns)
         parts.append(f"Columns: {columns}")
+        parts.append("Dtypes: " + ", ".join(f"{k}={v}" for k, v in types.items()))
         parts.append(df.to_csv(index=False))
         if row_count is not None:
             parts.append(f"Rows: {row_count}")
@@ -101,8 +109,9 @@ def summarize_table(file_path: str, max_rows: int = 5, cell_limit: int = 80) -> 
                 "Unique values: " + ", ".join(f"{k}={v}" for k, v in uniques.items())
             )
         parts.append(
-            f"Use get_table_path('{path.name}') to load this table in Python. "
-            "Enclose analysis in ```python``` blocks to execute it. "
+            f"Use get_table_path('{path.name}') to load the full table in Python. "
+            "Always inspect df.dtypes and convert columns (e.g. with pd.to_datetime) before filtering. "
+            "Enclose analysis in ```python``` blocks. "
             f"Preview limited to {max_rows} rows and {cell_limit} chars per cell."
         )
         return "\n".join(parts)
@@ -136,6 +145,7 @@ def summarize_table(file_path: str, max_rows: int = 5, cell_limit: int = 80) -> 
                     uniques = full_pd.nunique(dropna=False).to_dict()
                 except Exception:
                     uniques = {}
+            types = pdf.dtypes.astype(str).to_dict()
             pdf = _truncate_frame(pdf, cell_limit)
             columns = ', '.join(str(c) for c in pdf.columns)
             if row_count is not None:
@@ -143,14 +153,16 @@ def summarize_table(file_path: str, max_rows: int = 5, cell_limit: int = 80) -> 
             else:
                 parts.append(f"Sheet: {sheet}")
             parts.append(f"Columns: {columns}")
+            parts.append("Dtypes: " + ", ".join(f"{k}={v}" for k, v in types.items()))
             parts.append(pdf.to_csv(index=False))
             if uniques:
                 parts.append(
                     "Unique values: " + ", ".join(f"{k}={v}" for k, v in uniques.items())
                 )
         parts.append(
-            f"Use get_table_path('{path.name}') to load this table in Python. "
-            "Enclose analysis in ```python``` blocks to execute it. "
+            f"Use get_table_path('{path.name}') to load the full table in Python. "
+            "Always inspect df.dtypes and convert columns (e.g. with pd.to_datetime) before filtering. "
+            "Enclose analysis in ```python``` blocks. "
             f"Preview limited to {max_rows} rows and {cell_limit} chars per cell."
         )
         return "\n".join(parts)
@@ -191,9 +203,11 @@ def summarize_table(file_path: str, max_rows: int = 5, cell_limit: int = 80) -> 
                     uniques = pd.read_parquet(path).nunique(dropna=False).to_dict()
                 except Exception:
                     uniques = {}
+            types = df.dtypes.astype(str).to_dict()
             df = _truncate_frame(df, cell_limit)
             columns = ', '.join(str(c) for c in df.columns)
             parts.append(f"Columns: {columns}")
+            parts.append("Dtypes: " + ", ".join(f"{k}={v}" for k, v in types.items()))
             parts.append(df.to_csv(index=False))
             if row_count is not None:
                 parts.append(f"Rows: {row_count}")
@@ -202,8 +216,9 @@ def summarize_table(file_path: str, max_rows: int = 5, cell_limit: int = 80) -> 
                     "Unique values: " + ", ".join(f"{k}={v}" for k, v in uniques.items())
                 )
             parts.append(
-                f"Use get_table_path('{path.name}') to load this table in Python. "
-                "Enclose analysis in ```python``` blocks to execute it. "
+                f"Use get_table_path('{path.name}') to load the full table in Python. "
+                "Always inspect df.dtypes and convert columns (e.g. with pd.to_datetime) before filtering. "
+                "Enclose analysis in ```python``` blocks. "
                 f"Preview limited to {max_rows} rows and {cell_limit} chars per cell."
             )
             return "\n".join(parts)
@@ -222,8 +237,9 @@ def answer_question_with_pandas(question: str, file_path: str | Path) -> str:
     prompt = (
         f"Table `{table_name}` preview:\n{summary}\n\n"
         f"Question: {question}\n"
-        "Write pandas code to answer the question. "
-        "Store the answer in the variable `result`."
+        "Write pandas code to answer the question using the full table. "
+        "Inspect df.dtypes and cast columns (e.g. pd.to_datetime) before filtering. "
+        "Store the answer in the variable `result` and reply in the same language as the question."
     )
     return prompt
 
