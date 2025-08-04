@@ -9,6 +9,7 @@ import time
 from datetime import datetime
 from functools import partial
 from pathlib import Path
+import shutil
 
 import gradio as gr
 import yaml
@@ -223,10 +224,14 @@ def generate_chat_prompt(user_input, state, **kwargs):
                 for attachment in metadata[user_key]["attachments"]:
                     filename = attachment.get("name", "file")
                     content = attachment.get("content", "")
+                    dataset_id = attachment.get("dataset_id")
                     if attachment.get("type") == "text/html" and attachment.get("url"):
                         attachments_text += f"\nName: {filename}\nURL: {attachment['url']}\nContents:\n\n=====\n{content}\n=====\n\n"
                     else:
-                        attachments_text += f"\nName: {filename}\nContents:\n\n=====\n{content}\n=====\n\n"
+                        attachments_text += f"\nName: {filename}"
+                        if dataset_id:
+                            attachments_text += f"\nDataset ID: {dataset_id}"
+                        attachments_text += f"\nContents:\n\n=====\n{content}\n=====\n\n"
 
                 if attachments_text:
                     enhanced_user_msg = f"{user_msg}\n\nATTACHMENTS:\n{attachments_text}"
@@ -253,10 +258,14 @@ def generate_chat_prompt(user_input, state, **kwargs):
                 for attachment in metadata[user_key]["attachments"]:
                     filename = attachment.get("name", "file")
                     content = attachment.get("content", "")
+                    dataset_id = attachment.get("dataset_id")
                     if attachment.get("type") == "text/html" and attachment.get("url"):
                         attachments_text += f"\nName: {filename}\nURL: {attachment['url']}\nContents:\n\n=====\n{content}\n=====\n\n"
                     else:
-                        attachments_text += f"\nName: {filename}\nContents:\n\n=====\n{content}\n=====\n\n"
+                        attachments_text += f"\nName: {filename}"
+                        if dataset_id:
+                            attachments_text += f"\nDataset ID: {dataset_id}"
+                        attachments_text += f"\nContents:\n\n=====\n{content}\n=====\n\n"
 
                 if attachments_text:
                     user_input = f"{user_input}\n\nATTACHMENTS:\n{attachments_text}"
@@ -399,7 +408,7 @@ def count_prompt_tokens(text_input, state):
         if files:
             row_idx = len(temp_history['internal'])
             for file_path in files:
-                add_message_attachment(temp_history, row_idx, file_path, is_user=True)
+                add_message_attachment(temp_history, row_idx, file_path, is_user=True, chat_id=None)
 
         # Create temp state with modified history
         temp_state = copy.deepcopy(state)
@@ -493,7 +502,7 @@ def add_message_version(history, role, row_idx, is_current=True):
         history['metadata'][key]["current_version_index"] = len(history['metadata'][key]["versions"]) - 1
 
 
-def add_message_attachment(history, row_idx, file_path, is_user=True):
+def add_message_attachment(history, row_idx, file_path, is_user=True, chat_id=None):
     """Add a file attachment to a message in history metadata"""
     if 'metadata' not in history:
         history['metadata'] = {}
@@ -505,35 +514,56 @@ def add_message_attachment(history, row_idx, file_path, is_user=True):
     if "attachments" not in history['metadata'][key]:
         history['metadata'][key]["attachments"] = []
 
-    # Get file info using pathlib
+    # Determine storage path
     path = Path(file_path)
+    if chat_id is not None:
+        try:
+            from modules import login
+            user = login.current_user or 'anonymous'
+        except Exception:
+            user = 'anonymous'
+        dest_dir = Path(f'user_data/sessions/{user}/files/{chat_id}')
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        dest_path = dest_dir / path.name
+        if path != dest_path:
+            shutil.copy(path, dest_path)
+        path = dest_path
+
     filename = path.name
     file_extension = path.suffix.lower()
 
     try:
         # Handle different file types
         if file_extension == '.pdf':
-            # Process PDF file
             content = extract_pdf_text(path)
             file_type = "application/pdf"
         elif file_extension == '.docx':
             content = extract_docx_text(path)
             file_type = "application/docx"
+        elif file_extension in ('.xls', '.xlsx', '.csv'):
+            from modules import dataset_tool
+            dataset_id = dataset_tool.register_table(path)
+            content = extract_xlsx_text(path)
+            file_type = "application/vnd.ms-excel"
+        elif file_extension == '.pptx':
+            content = extract_pptx_text(path)
+            file_type = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
         else:
-            # Default handling for text files
             with open(path, 'r', encoding='utf-8') as f:
                 content = f.read()
             file_type = "text/plain"
 
-        # Add attachment
         attachment = {
             "name": filename,
             "type": file_type,
             "content": content,
+            "path": str(path)
         }
+        if file_extension in ('.xls', '.xlsx', '.csv'):
+            attachment["dataset_id"] = dataset_id
 
         history['metadata'][key]["attachments"].append(attachment)
-        return content  # Return the content for reuse
+        return content
     except Exception as e:
         logger.error(f"Error processing attachment {filename}: {e}")
         return None
@@ -604,6 +634,32 @@ def extract_docx_text(docx_path):
         return f"[Error extracting DOCX text: {str(e)}]"
 
 
+def extract_xlsx_text(xlsx_path):
+    """Read sheets from Excel or CSV file and convert to Markdown."""
+    try:
+        from modules import dataset_tool
+        return dataset_tool.summarize_table(xlsx_path, max_rows=5)
+    except Exception as e:
+        logger.error(f"Error extracting text from Excel: {e}")
+        return f"[Error extracting Excel text: {str(e)}]"
+
+
+def extract_pptx_text(pptx_path):
+    """Extract text from a PPTX presentation"""
+    try:
+        from pptx import Presentation
+        prs = Presentation(pptx_path)
+        texts = []
+        for slide in prs.slides:
+            for shape in slide.shapes:
+                if hasattr(shape, "text"):
+                    texts.append(shape.text)
+        return "\n".join(texts)
+    except Exception as e:
+        logger.error(f"Error extracting text from PPTX: {e}")
+        return f"[Error extracting PPTX text: {str(e)}]"
+
+
 def generate_search_query(user_message, state):
     """Generate a search query from user message using the LLM"""
     # Augment the user message with search instruction
@@ -664,7 +720,7 @@ def chatbot_wrapper(text, state, regenerate=False, _continue=False, loading_mess
 
         # Add attachments to metadata only, not modifying the message text
         for file_path in files:
-            add_message_attachment(output, row_idx, file_path, is_user=True)
+            add_message_attachment(output, row_idx, file_path, is_user=True, chat_id=state.get('unique_id'))
 
         # Add web search results as attachments if enabled
         if state.get('enable_web_search', False):
@@ -963,19 +1019,20 @@ def start_new_chat(state):
     return history
 
 
+from modules import login
+
+
 def get_history_file_path(unique_id, character, mode):
+    user = login.current_user or 'anonymous'
     if mode == 'instruct':
-        p = Path(f'user_data/logs/instruct/{unique_id}.json')
+        p = Path(f'user_data/sessions/{user}/instruct/{unique_id}.json')
     else:
-        p = Path(f'user_data/logs/chat/{character}/{unique_id}.json')
+        p = Path(f'user_data/sessions/{user}/chat/{character}/{unique_id}.json')
 
     return p
 
 
 def save_history(history, unique_id, character, mode):
-    if shared.args.multi_user:
-        return
-
     p = get_history_file_path(unique_id, character, mode)
     if not p.parent.is_dir():
         p.parent.mkdir(parents=True)
@@ -985,8 +1042,6 @@ def save_history(history, unique_id, character, mode):
 
 
 def rename_history(old_id, new_id, character, mode):
-    if shared.args.multi_user:
-        return
 
     old_p = get_history_file_path(old_id, character, mode)
     new_p = get_history_file_path(new_id, character, mode)
@@ -999,17 +1054,31 @@ def rename_history(old_id, new_id, character, mode):
     else:
         logger.info(f"Renaming \"{old_p}\" to \"{new_p}\"")
         old_p.rename(new_p)
+        user = login.current_user or 'anonymous'
+        old_files = Path(f'user_data/sessions/{user}/files/{old_id}')
+        new_files = Path(f'user_data/sessions/{user}/files/{new_id}')
+        if old_files.exists():
+            new_files.parent.mkdir(parents=True, exist_ok=True)
+            old_files.rename(new_files)
+            try:
+                from modules import dataset_tool
+                for fp in new_files.glob('*'):
+                    dataset_tool.register_table(fp)
+            except Exception:
+                pass
 
 
 def get_paths(state):
     if state['mode'] == 'instruct':
-        return Path('user_data/logs/instruct').glob('*.json')
+        user = login.current_user or 'anonymous'
+        return Path(f'user_data/sessions/{user}/instruct').glob('*.json')
     else:
         character = state['character_menu']
 
         # Handle obsolete filenames and paths
-        old_p = Path(f'user_data/logs/{character}_persistent.json')
-        new_p = Path(f'user_data/logs/persistent_{character}.json')
+        user = login.current_user or 'anonymous'
+        old_p = Path(f'user_data/sessions/{user}/chat/{character}_persistent.json')
+        new_p = Path(f'user_data/sessions/{user}/chat/persistent_{character}.json')
         if old_p.exists():
             logger.warning(f"Renaming \"{old_p}\" to \"{new_p}\"")
             old_p.rename(new_p)
@@ -1021,12 +1090,10 @@ def get_paths(state):
             p.parent.mkdir(exist_ok=True)
             new_p.rename(p)
 
-        return Path(f'user_data/logs/chat/{character}').glob('*.json')
+        return Path(f'user_data/sessions/{user}/chat/{character}').glob('*.json')
 
 
 def find_all_histories(state):
-    if shared.args.multi_user:
-        return ['']
 
     paths = get_paths(state)
     histories = sorted(paths, key=lambda x: x.stat().st_mtime, reverse=True)
@@ -1034,8 +1101,6 @@ def find_all_histories(state):
 
 
 def find_all_histories_with_first_prompts(state):
-    if shared.args.multi_user:
-        return []
 
     paths = get_paths(state)
     histories = sorted(paths, key=lambda x: x.stat().st_mtime, reverse=True)
@@ -1083,8 +1148,6 @@ def load_latest_history(state):
     mode, or the latest instruct history for instruct mode.
     '''
 
-    if shared.args.multi_user:
-        return start_new_chat(state), None
 
     histories = find_all_histories(state)
 
@@ -1113,8 +1176,6 @@ def load_history_after_deletion(state, idx):
     mode, or the latest instruct history for instruct mode.
     '''
 
-    if shared.args.multi_user:
-        return start_new_chat(state)
 
     histories = find_all_histories_with_first_prompts(state)
     idx = min(int(idx), len(histories) - 1)
@@ -1146,7 +1207,8 @@ def get_chat_state_key(character, mode):
 
 def load_last_chat_state():
     """Load the last chat state from file"""
-    state_file = Path('user_data/logs/chat_state.json')
+    user = login.current_user or 'anonymous'
+    state_file = Path(f'user_data/sessions/{user}/chat_state.json')
     if state_file.exists():
         try:
             with open(state_file, 'r', encoding='utf-8') as f:
@@ -1159,14 +1221,13 @@ def load_last_chat_state():
 
 def save_last_chat_state(character, mode, unique_id):
     """Save the last visited chat for a character/mode"""
-    if shared.args.multi_user:
-        return
 
     state = load_last_chat_state()
     key = get_chat_state_key(character, mode)
     state["last_chats"][key] = unique_id
 
-    state_file = Path('user_data/logs/chat_state.json')
+    user = login.current_user or 'anonymous'
+    state_file = Path(f'user_data/sessions/{user}/chat_state.json')
     state_file.parent.mkdir(exist_ok=True)
     with open(state_file, 'w', encoding='utf-8') as f:
         f.write(json.dumps(state, indent=2))
@@ -1227,6 +1288,21 @@ def load_history_json(file, history):
 def delete_history(unique_id, character, mode):
     p = get_history_file_path(unique_id, character, mode)
     delete_file(p)
+    try:
+        from modules import login
+        user = login.current_user or 'anonymous'
+    except Exception:
+        user = 'anonymous'
+    attachments_dir = Path(f'user_data/sessions/{user}/files/{unique_id}')
+    if attachments_dir.exists():
+        try:
+            from modules import dataset_tool
+            for name, p in list(dataset_tool._loaded_tables.items()):
+                if p.startswith(str(attachments_dir)):
+                    del dataset_tool._loaded_tables[name]
+        except Exception:
+            pass
+        shutil.rmtree(attachments_dir)
 
 
 def replace_character_names(text, name1, name2):
