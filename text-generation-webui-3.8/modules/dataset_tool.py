@@ -31,11 +31,26 @@ def _truncate_frame(df: "pd.DataFrame", limit: int) -> "pd.DataFrame":
     if limit:
         df_str = df.astype(str)
         truncate = lambda x: x[:limit] + ("..." if len(x) > limit else "")
-        # DataFrame.map was introduced in pandas 2.1 as a replacement for applymap
+        # pandas <2.1 does not expose DataFrame.map and using applymap
+        # raises a FutureWarning in newer versions. Use column-wise map to
+        # remain compatible across pandas releases without emitting warnings.
         if hasattr(df_str, "map"):
             return df_str.map(truncate)
-        return df_str.applymap(truncate)
+        return df_str.apply(lambda col: col.map(truncate))
     return df
+
+
+def _count_uniques_csv(path: Path, columns) -> dict[str, int]:
+    """Return the number of unique values for each column in a CSV file.
+
+    The CSV is processed in chunks to avoid loading the entire file into
+    memory at once, enabling handling of very large files.
+    """
+    uniques_sets: dict[str, set] = {c: set() for c in columns}
+    for chunk in pd.read_csv(path, dtype=str, usecols=columns, chunksize=10000):
+        for col in columns:
+            uniques_sets[col].update(chunk[col].dropna().astype(str).unique())
+    return {col: len(vals) for col, vals in uniques_sets.items()}
 
 
 def summarize_table(file_path: str, max_rows: int = 5, cell_limit: int = 80) -> str:
@@ -67,11 +82,7 @@ def summarize_table(file_path: str, max_rows: int = 5, cell_limit: int = 80) -> 
         if df is None:
             df = pd.read_csv(path, nrows=max_rows, dtype=str)
             try:
-                uniques = (
-                    pd.read_csv(path, dtype=str, usecols=df.columns)
-                    .nunique(dropna=False)
-                    .to_dict()
-                )
+                uniques = _count_uniques_csv(path, df.columns)
             except Exception:
                 uniques = {}
         try:
@@ -230,7 +241,11 @@ def execute_pandas_code(
         return 'No file path provided'
     path = Path(file_path)
     if not path.exists():
-        return f'File not found: {path}'
+        alt = get_table_path(path.name)
+        if alt:
+            path = Path(alt)
+        else:
+            return f'File not found: {path}'
     suffix = path.suffix.lower()
     local_vars = {}
 
@@ -240,9 +255,9 @@ def execute_pandas_code(
                 try:
                     local_vars['df'] = pl.scan_csv(path, ignore_errors=True).collect().to_pandas()
                 except Exception:
-                    local_vars['df'] = pd.read_csv(path)
+                    local_vars['df'] = pd.read_csv(path, low_memory=False)
             else:
-                local_vars['df'] = pd.read_csv(path)
+                local_vars['df'] = pd.read_csv(path, low_memory=False)
         elif suffix in {'.xls', '.xlsx'}:
             xls = pd.ExcelFile(path)
             for sheet in xls.sheet_names:

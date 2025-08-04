@@ -843,7 +843,9 @@ def chatbot_wrapper(text, state, regenerate=False, _continue=False, loading_mess
                 if res.get('stdout'):
                     final_text += f"\n```\n{res['stdout']}\n```"
                 for img in res.get('images', []):
-                    final_text += f"\n![image]({img})"
+                    # Images are served through the /file endpoint. Prefix paths
+                    # so that the markdown renderer can display them correctly.
+                    final_text += f"\n![image](file/{img})"
         except Exception as e:
             logger.error(f"Python tool execution error: {e}")
     output['internal'][-1][1] = final_text
