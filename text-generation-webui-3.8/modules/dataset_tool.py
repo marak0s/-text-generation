@@ -38,7 +38,12 @@ def summarize_table(file_path: str, max_rows: int = 5) -> str:
         df = None
         if pl:
             try:
-                df = pl.read_csv(path, n_rows=max_rows, ignore_errors=True).to_pandas()
+                df = (
+                    pl.scan_csv(path, ignore_errors=True)
+                    .head(max_rows)
+                    .collect()
+                    .to_pandas()
+                )
             except Exception:  # pragma: no cover - fallback to pandas
                 df = None
         if df is None:
@@ -72,7 +77,12 @@ def summarize_table(file_path: str, max_rows: int = 5) -> str:
             df = None
             if pl:
                 try:
-                    df = pl.read_parquet(path, n_rows=max_rows).to_pandas()
+                    df = (
+                        pl.scan_parquet(path)
+                        .head(max_rows)
+                        .collect()
+                        .to_pandas()
+                    )
                 except Exception:
                     df = None
             if df is None:
@@ -105,7 +115,7 @@ def answer_question_with_pandas(question: str, file_path: str | Path) -> str:
     return prompt
 
 
-def execute_pandas_code(code: str, file_path: str | Path) -> str:
+def execute_pandas_code(code: str, file_path: str | Path, max_output_rows: int | None = 20) -> str:
     """Execute pandas code against the provided table and return the result."""
     if pd is None:
         return 'pandas is required'
@@ -117,7 +127,7 @@ def execute_pandas_code(code: str, file_path: str | Path) -> str:
         if suffix == '.csv':
             if pl:
                 try:
-                    local_vars['df'] = pl.read_csv(path, ignore_errors=True).to_pandas()
+                    local_vars['df'] = pl.scan_csv(path, ignore_errors=True).collect().to_pandas()
                 except Exception:
                     local_vars['df'] = pd.read_csv(path)
             else:
@@ -136,7 +146,7 @@ def execute_pandas_code(code: str, file_path: str | Path) -> str:
             try:
                 if pl:
                     try:
-                        local_vars['df'] = pl.read_parquet(path).to_pandas()
+                        local_vars['df'] = pl.scan_parquet(path).collect().to_pandas()
                     except Exception:
                         local_vars['df'] = pd.read_parquet(path)
                 else:
@@ -149,7 +159,10 @@ def execute_pandas_code(code: str, file_path: str | Path) -> str:
         exec(code, {'pd': pd}, local_vars)
         result = local_vars.get('result')
         if isinstance(result, pd.DataFrame):
-            return result.head().to_csv(index=False)
+            if max_output_rows is not None and len(result) > max_output_rows:
+                head = result.head(max_output_rows).to_csv(index=False)
+                return f"{head}\n... ({len(result) - max_output_rows} more rows)"
+            return result.to_csv(index=False)
         return str(result) if result is not None else 'No result'
     except Exception as e:
         return f'Error executing code: {e}'
