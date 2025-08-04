@@ -29,9 +29,12 @@ def get_table_path(name: str) -> str | None:
 def _truncate_frame(df: "pd.DataFrame", limit: int) -> "pd.DataFrame":
     """Return a copy of ``df`` with each cell truncated to ``limit`` characters."""
     if limit:
-        return df.astype(str).applymap(
-            lambda x: x[:limit] + ("..." if len(x) > limit else "")
-        )
+        df_str = df.astype(str)
+        truncate = lambda x: x[:limit] + ("..." if len(x) > limit else "")
+        # DataFrame.map was introduced in pandas 2.1 as a replacement for applymap
+        if hasattr(df_str, "map"):
+            return df_str.map(truncate)
+        return df_str.applymap(truncate)
     return df
 
 
@@ -216,14 +219,18 @@ def answer_question_with_pandas(question: str, file_path: str | Path) -> str:
 
 def execute_pandas_code(
     code: str,
-    file_path: str | Path,
+    file_path: str | Path | None,
     max_output_rows: int | None = 20,
     cell_limit: int = 80,
 ) -> str:
     """Execute pandas code against the provided table and return the result."""
     if pd is None:
         return 'pandas is required'
+    if not file_path:
+        return 'No file path provided'
     path = Path(file_path)
+    if not path.exists():
+        return f'File not found: {path}'
     suffix = path.suffix.lower()
     local_vars = {}
 
