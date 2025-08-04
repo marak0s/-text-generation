@@ -26,7 +26,16 @@ def get_table_path(name: str) -> str | None:
     return _loaded_tables.get(name)
 
 
-def summarize_table(file_path: str, max_rows: int = 5) -> str:
+def _truncate_frame(df: "pd.DataFrame", limit: int) -> "pd.DataFrame":
+    """Return a copy of ``df`` with each cell truncated to ``limit`` characters."""
+    if limit:
+        return df.astype(str).applymap(
+            lambda x: x[:limit] + ("..." if len(x) > limit else "")
+        )
+    return df
+
+
+def summarize_table(file_path: str, max_rows: int = 5, cell_limit: int = 80) -> str:
     """Return a lightweight textual preview of an Excel, CSV or Parquet table."""
     if pd is None:
         return '[pandas not installed]'
@@ -48,10 +57,14 @@ def summarize_table(file_path: str, max_rows: int = 5) -> str:
                 df = None
         if df is None:
             df = pd.read_csv(path, nrows=max_rows, dtype=str)
+        df = _truncate_frame(df, cell_limit)
         columns = ', '.join(str(c) for c in df.columns)
         parts.append(f"Columns: {columns}")
         parts.append(df.to_csv(index=False))
-        parts.append(f"Use get_table_path('{path.name}') to load this table in Python.")
+        parts.append(
+            f"Use get_table_path('{path.name}') to load this table in Python. "
+            f"Preview limited to {max_rows} rows and {cell_limit} chars per cell."
+        )
         return "\n".join(parts)
 
     if suffix in {'.xls', '.xlsx'}:
@@ -65,11 +78,15 @@ def summarize_table(file_path: str, max_rows: int = 5) -> str:
                     pdf = None
             if pdf is None:
                 pdf = xls.parse(sheet, nrows=max_rows)
+            pdf = _truncate_frame(pdf, cell_limit)
             columns = ', '.join(str(c) for c in pdf.columns)
             parts.append(f"Sheet: {sheet}")
             parts.append(f"Columns: {columns}")
             parts.append(pdf.to_csv(index=False))
-        parts.append(f"Use get_table_path('{path.name}') to load this table in Python.")
+        parts.append(
+            f"Use get_table_path('{path.name}') to load this table in Python. "
+            f"Preview limited to {max_rows} rows and {cell_limit} chars per cell."
+        )
         return "\n".join(parts)
 
     if suffix == '.parquet':
@@ -89,10 +106,14 @@ def summarize_table(file_path: str, max_rows: int = 5) -> str:
                 df = pd.read_parquet(path)
                 if max_rows:
                     df = df.head(max_rows)
+            df = _truncate_frame(df, cell_limit)
             columns = ', '.join(str(c) for c in df.columns)
             parts.append(f"Columns: {columns}")
             parts.append(df.to_csv(index=False))
-            parts.append(f"Use get_table_path('{path.name}') to load this table in Python.")
+            parts.append(
+                f"Use get_table_path('{path.name}') to load this table in Python. "
+                f"Preview limited to {max_rows} rows and {cell_limit} chars per cell."
+            )
             return "\n".join(parts)
         except Exception as e:
             return f"[Error reading parquet: {e}]"
@@ -115,7 +136,12 @@ def answer_question_with_pandas(question: str, file_path: str | Path) -> str:
     return prompt
 
 
-def execute_pandas_code(code: str, file_path: str | Path, max_output_rows: int | None = 20) -> str:
+def execute_pandas_code(
+    code: str,
+    file_path: str | Path,
+    max_output_rows: int | None = 20,
+    cell_limit: int = 80,
+) -> str:
     """Execute pandas code against the provided table and return the result."""
     if pd is None:
         return 'pandas is required'
@@ -160,9 +186,11 @@ def execute_pandas_code(code: str, file_path: str | Path, max_output_rows: int |
         result = local_vars.get('result')
         if isinstance(result, pd.DataFrame):
             if max_output_rows is not None and len(result) > max_output_rows:
-                head = result.head(max_output_rows).to_csv(index=False)
+                head = _truncate_frame(result.head(max_output_rows), cell_limit).to_csv(
+                    index=False
+                )
                 return f"{head}\n... ({len(result) - max_output_rows} more rows)"
-            return result.to_csv(index=False)
+            return _truncate_frame(result, cell_limit).to_csv(index=False)
         return str(result) if result is not None else 'No result'
     except Exception as e:
         return f'Error executing code: {e}'
