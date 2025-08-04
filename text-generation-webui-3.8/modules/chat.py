@@ -843,9 +843,14 @@ def chatbot_wrapper(text, state, regenerate=False, _continue=False, loading_mess
                 if res.get('stdout'):
                     final_text += f"\n```\n{res['stdout']}\n```"
                 for img in res.get('images', []):
-                    # Images are served through the /file endpoint. Prefix paths
-                    # so that the markdown renderer can display them correctly.
-                    final_text += f"\n![image](/file/{img})"
+                    # Inline images directly in the message using base64. The
+                    # interface reliably displays embedded data URIs even when
+                    # static file serving is unavailable.
+                    try:
+                        b64 = base64.b64encode(Path(img).read_bytes()).decode('ascii')
+                        final_text += f"\n![image](data:image/png;base64,{b64})"
+                    except Exception:
+                        final_text += f"\n[Image saved to {img}]"
         except Exception as e:
             logger.error(f"Python tool execution error: {e}")
     output['internal'][-1][1] = final_text

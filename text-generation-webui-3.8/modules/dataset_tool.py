@@ -11,6 +11,9 @@ except Exception:  # pragma: no cover - optional dependency
     pl = None
 
 _loaded_tables: dict[str, str] = {}
+# Cache loaded DataFrames so subsequent queries do not reread large
+# datasets from disk. Keys are the registered table names.
+_table_cache: dict[str, "pd.DataFrame"] = {}
 
 
 def register_table(file_path: str | Path) -> str:
@@ -264,37 +267,54 @@ def execute_pandas_code(
             return f'File not found: {path}'
     suffix = path.suffix.lower()
     local_vars = {}
+    name = path.name
 
     try:
         if suffix == '.csv':
-            if pl:
-                try:
-                    local_vars['df'] = pl.scan_csv(path, ignore_errors=True).collect().to_pandas()
-                except Exception:
-                    local_vars['df'] = pd.read_csv(path, low_memory=False)
+            if name in _table_cache:
+                local_vars['df'] = _table_cache[name]
             else:
-                local_vars['df'] = pd.read_csv(path, low_memory=False)
+                if pl:
+                    try:
+                        df = pl.scan_csv(path, ignore_errors=True).collect().to_pandas()
+                    except Exception:
+                        df = pd.read_csv(path, low_memory=False)
+                else:
+                    df = pd.read_csv(path, low_memory=False)
+                _table_cache[name] = df
+                local_vars['df'] = df
         elif suffix in {'.xls', '.xlsx'}:
-            xls = pd.ExcelFile(path)
-            for sheet in xls.sheet_names:
-                if pl:
-                    try:
-                        local_vars[sheet] = pl.read_excel(path, sheet_name=sheet).to_pandas()
-                    except Exception:
-                        local_vars[sheet] = xls.parse(sheet)
-                else:
-                    local_vars[sheet] = xls.parse(sheet)
+            if name in _table_cache:
+                sheets = _table_cache[name]
+            else:
+                xls = pd.ExcelFile(path)
+                sheets = {}
+                for sheet in xls.sheet_names:
+                    if pl:
+                        try:
+                            sheets[sheet] = pl.read_excel(path, sheet_name=sheet).to_pandas()
+                        except Exception:
+                            sheets[sheet] = xls.parse(sheet)
+                    else:
+                        sheets[sheet] = xls.parse(sheet)
+                _table_cache[name] = sheets
+            local_vars.update(sheets)
         elif suffix == '.parquet':
-            try:
-                if pl:
-                    try:
-                        local_vars['df'] = pl.scan_parquet(path).collect().to_pandas()
-                    except Exception:
-                        local_vars['df'] = pd.read_parquet(path)
-                else:
-                    local_vars['df'] = pd.read_parquet(path)
-            except Exception as e:
-                return f'Error reading parquet: {e}'
+            if name in _table_cache:
+                local_vars['df'] = _table_cache[name]
+            else:
+                try:
+                    if pl:
+                        try:
+                            df = pl.scan_parquet(path).collect().to_pandas()
+                        except Exception:
+                            df = pd.read_parquet(path)
+                    else:
+                        df = pd.read_parquet(path)
+                except Exception as e:
+                    return f'Error reading parquet: {e}'
+                _table_cache[name] = df
+                local_vars['df'] = df
         else:
             return f'Unsupported file type: {path.suffix}'
 
