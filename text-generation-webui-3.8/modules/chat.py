@@ -540,7 +540,7 @@ def add_message_attachment(history, row_idx, file_path, is_user=True, chat_id=No
         elif file_extension == '.docx':
             content = extract_docx_text(path)
             file_type = "application/docx"
-        elif file_extension in ('.xls', '.xlsx', '.csv'):
+        elif file_extension in ('.xls', '.xlsx', '.csv', '.parquet'):
             from modules import dataset_tool
             dataset_id = dataset_tool.register_table(path)
             content = extract_xlsx_text(path)
@@ -559,7 +559,7 @@ def add_message_attachment(history, row_idx, file_path, is_user=True, chat_id=No
             "content": content,
             "path": str(path)
         }
-        if file_extension in ('.xls', '.xlsx', '.csv'):
+        if file_extension in ('.xls', '.xlsx', '.csv', '.parquet'):
             attachment["dataset_id"] = dataset_id
 
         history['metadata'][key]["attachments"].append(attachment)
@@ -635,7 +635,7 @@ def extract_docx_text(docx_path):
 
 
 def extract_xlsx_text(xlsx_path):
-    """Read sheets from Excel or CSV file and convert to Markdown."""
+    """Read sheets from Excel/CSV/Parquet file and convert to Markdown."""
     try:
         from modules import dataset_tool
         return dataset_tool.summarize_table(xlsx_path, max_rows=5)
@@ -835,15 +835,15 @@ def chatbot_wrapper(text, state, regenerate=False, _continue=False, loading_mess
     code_blocks = re.findall(r"```python\n(.*?)```", final_text, re.DOTALL)
     if code_blocks:
         try:
-            from modules import python_tool
+            from modules import python_tool, login
+            user = getattr(login, 'current_user', 'anonymous')
+            img_dir = Path(f"user_data/sessions/{user}/files/{state.get('unique_id')}")
             for code in code_blocks:
-                res = python_tool.execute_python(code)
+                res = python_tool.execute_python(code, out_dir=img_dir)
                 if res.get('stdout'):
                     final_text += f"\n```\n{res['stdout']}\n```"
                 for img in res.get('images', []):
-                    with open(img, 'rb') as f:
-                        b64 = base64.b64encode(f.read()).decode('utf-8')
-                    final_text += f"\n![image](data:image/png;base64,{b64})"
+                    final_text += f"\n![image]({img})"
         except Exception as e:
             logger.error(f"Python tool execution error: {e}")
     output['internal'][-1][1] = final_text
