@@ -1,5 +1,9 @@
-import pandas as pd
 from pathlib import Path
+
+try:  # pragma: no cover - pandas is an optional dependency at runtime
+    import pandas as pd
+except Exception:  # pragma: no cover
+    pd = None
 
 try:
     import polars as pl
@@ -24,16 +28,22 @@ def get_table_path(name: str) -> str | None:
 
 def summarize_table(file_path: str, max_rows: int = 5) -> str:
     """Return a lightweight textual preview of an Excel, CSV or Parquet table."""
+    if pd is None:
+        return '[pandas not installed]'
     path = Path(file_path)
     parts = [f"Table: {path.name}"]
     suffix = path.suffix.lower()
 
     if suffix == '.csv':
+        df = None
         if pl:
-            df = pl.read_csv(path, n_rows=max_rows).to_pandas()
-        else:
-            df = pd.read_csv(path, nrows=max_rows)
-        columns = ', '.join(df.columns.astype(str))
+            try:
+                df = pl.read_csv(path, n_rows=max_rows, ignore_errors=True).to_pandas()
+            except Exception:  # pragma: no cover - fallback to pandas
+                df = None
+        if df is None:
+            df = pd.read_csv(path, nrows=max_rows, dtype=str)
+        columns = ', '.join(str(c) for c in df.columns)
         parts.append(f"Columns: {columns}")
         parts.append(df.to_csv(index=False))
         parts.append(f"Use get_table_path('{path.name}') to load this table in Python.")
@@ -42,11 +52,15 @@ def summarize_table(file_path: str, max_rows: int = 5) -> str:
     if suffix in {'.xls', '.xlsx'}:
         xls = pd.ExcelFile(path)
         for sheet in xls.sheet_names:
+            pdf = None
             if pl:
-                pdf = pl.read_excel(path, sheet_id=sheet, n_rows=max_rows).to_pandas()
-            else:
+                try:
+                    pdf = pl.read_excel(path, sheet_name=sheet, n_rows=max_rows).to_pandas()
+                except Exception:  # pragma: no cover - fallback to pandas
+                    pdf = None
+            if pdf is None:
                 pdf = xls.parse(sheet, nrows=max_rows)
-            columns = ', '.join(pdf.columns.astype(str))
+            columns = ', '.join(str(c) for c in pdf.columns)
             parts.append(f"Sheet: {sheet}")
             parts.append(f"Columns: {columns}")
             parts.append(pdf.to_csv(index=False))
@@ -55,13 +69,17 @@ def summarize_table(file_path: str, max_rows: int = 5) -> str:
 
     if suffix == '.parquet':
         try:
+            df = None
             if pl:
-                df = pl.read_parquet(path, n_rows=max_rows).to_pandas()
-            else:
+                try:
+                    df = pl.read_parquet(path, n_rows=max_rows).to_pandas()
+                except Exception:
+                    df = None
+            if df is None:
                 df = pd.read_parquet(path)
                 if max_rows:
                     df = df.head(max_rows)
-            columns = ', '.join(df.columns.astype(str))
+            columns = ', '.join(str(c) for c in df.columns)
             parts.append(f"Columns: {columns}")
             parts.append(df.to_csv(index=False))
             parts.append(f"Use get_table_path('{path.name}') to load this table in Python.")
@@ -74,6 +92,8 @@ def summarize_table(file_path: str, max_rows: int = 5) -> str:
 
 def answer_question_with_pandas(question: str, file_path: str | Path) -> str:
     """Return a prompt for an LLM to generate pandas code."""
+    if pd is None:
+        raise RuntimeError('pandas is required for table questions')
     table_name = register_table(file_path)
     summary = summarize_table(file_path)
     prompt = (
@@ -87,6 +107,8 @@ def answer_question_with_pandas(question: str, file_path: str | Path) -> str:
 
 def execute_pandas_code(code: str, file_path: str | Path) -> str:
     """Execute pandas code against the provided table and return the result."""
+    if pd is None:
+        return 'pandas is required'
     path = Path(file_path)
     suffix = path.suffix.lower()
     local_vars = {}
@@ -94,20 +116,29 @@ def execute_pandas_code(code: str, file_path: str | Path) -> str:
     try:
         if suffix == '.csv':
             if pl:
-                local_vars['df'] = pl.read_csv(path).to_pandas()
+                try:
+                    local_vars['df'] = pl.read_csv(path, ignore_errors=True).to_pandas()
+                except Exception:
+                    local_vars['df'] = pd.read_csv(path)
             else:
                 local_vars['df'] = pd.read_csv(path)
         elif suffix in {'.xls', '.xlsx'}:
             xls = pd.ExcelFile(path)
             for sheet in xls.sheet_names:
                 if pl:
-                    local_vars[sheet] = pl.read_excel(path, sheet_id=sheet).to_pandas()
+                    try:
+                        local_vars[sheet] = pl.read_excel(path, sheet_name=sheet).to_pandas()
+                    except Exception:
+                        local_vars[sheet] = xls.parse(sheet)
                 else:
                     local_vars[sheet] = xls.parse(sheet)
         elif suffix == '.parquet':
             try:
                 if pl:
-                    local_vars['df'] = pl.read_parquet(path).to_pandas()
+                    try:
+                        local_vars['df'] = pl.read_parquet(path).to_pandas()
+                    except Exception:
+                        local_vars['df'] = pd.read_parquet(path)
                 else:
                     local_vars['df'] = pd.read_parquet(path)
             except Exception as e:
