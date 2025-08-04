@@ -831,18 +831,28 @@ def chatbot_wrapper(text, state, regenerate=False, _continue=False, loading_mess
         if is_stream:
             yield output
 
-    if _continue:
-        # Reprocess the entire internal text for extensions (like translation)
-        full_internal = output['internal'][-1][1]
-        if state['mode'] in ['chat', 'chat-instruct']:
-            full_visible = re.sub("(<USER>|<user>|{{user}})", state['name1'], full_internal)
-        else:
-            full_visible = full_internal
-
-        full_visible = html.escape(full_visible)
-        output['visible'][-1][1] = apply_extensions('output', full_visible, state, is_chat=True)
+    final_text = output['internal'][-1][1]
+    code_blocks = re.findall(r"```python\n(.*?)```", final_text, re.DOTALL)
+    if code_blocks:
+        try:
+            from modules import python_tool
+            for code in code_blocks:
+                res = python_tool.execute_python(code)
+                if res.get('stdout'):
+                    final_text += f"\n```\n{res['stdout']}\n```"
+                for img in res.get('images', []):
+                    with open(img, 'rb') as f:
+                        b64 = base64.b64encode(f.read()).decode('utf-8')
+                    final_text += f"\n![image](data:image/png;base64,{b64})"
+        except Exception as e:
+            logger.error(f"Python tool execution error: {e}")
+    output['internal'][-1][1] = final_text
+    if state['mode'] in ['chat', 'chat-instruct']:
+        visible = re.sub("(<USER>|<user>|{{user}})", state['name1'], final_text)
     else:
-        output['visible'][-1][1] = apply_extensions('output', output['visible'][-1][1], state, is_chat=True)
+        visible = final_text
+    visible = html.escape(visible)
+    output['visible'][-1][1] = apply_extensions('output', visible, state, is_chat=True)
 
     # Final sync for version metadata (in case streaming was disabled)
     if regenerate:

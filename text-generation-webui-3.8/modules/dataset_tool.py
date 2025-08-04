@@ -27,6 +27,7 @@ def summarize_table(file_path: str, max_rows: int = 5) -> str:
         columns = ', '.join(df.columns.astype(str))
         parts.append(f"Columns: {columns}")
         parts.append(df.to_csv(index=False))
+        parts.append(f"Use get_table_path('{path.name}') to load this table in Python.")
         return "\n".join(parts)
 
     if path.suffix.lower() in {'.xls', '.xlsx'}:
@@ -37,6 +38,7 @@ def summarize_table(file_path: str, max_rows: int = 5) -> str:
             parts.append(f"Sheet: {sheet}")
             parts.append(f"Columns: {columns}")
             parts.append(df.to_csv(index=False))
+        parts.append(f"Use get_table_path('{path.name}') to load this table in Python.")
         return "\n".join(parts)
 
     raise ValueError('Unsupported file type: %s' % path.suffix)
