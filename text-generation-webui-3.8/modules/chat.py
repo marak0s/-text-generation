@@ -519,6 +519,12 @@ def add_message_attachment(history, row_idx, file_path, is_user=True):
         elif file_extension == '.docx':
             content = extract_docx_text(path)
             file_type = "application/docx"
+        elif file_extension in ('.xls', '.xlsx', '.csv'):
+            content = extract_xlsx_text(path)
+            file_type = "application/vnd.ms-excel"
+        elif file_extension == '.pptx':
+            content = extract_pptx_text(path)
+            file_type = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
         else:
             # Default handling for text files
             with open(path, 'r', encoding='utf-8') as f:
@@ -530,6 +536,7 @@ def add_message_attachment(history, row_idx, file_path, is_user=True):
             "name": filename,
             "type": file_type,
             "content": content,
+            "path": str(path),
         }
 
         history['metadata'][key]["attachments"].append(attachment)
@@ -602,6 +609,46 @@ def extract_docx_text(docx_path):
     except Exception as e:
         logger.error(f"Error extracting text from DOCX: {e}")
         return f"[Error extracting DOCX text: {str(e)}]"
+
+
+def extract_xlsx_text(xlsx_path):
+    """Read sheets from Excel or CSV file and convert to Markdown"""
+    try:
+        from modules import dataset_tool
+        return dataset_tool.summarize_table(xlsx_path, max_rows=5)
+    except Exception as e:
+        logger.error(f"Error extracting text from Excel: {e}")
+        return f"[Error extracting Excel text: {str(e)}]"
+
+
+def extract_pptx_text(pptx_path):
+    """Extract text from a PPTX presentation"""
+    try:
+        from pptx import Presentation
+        prs = Presentation(pptx_path)
+        texts = []
+        for slide in prs.slides:
+            for shape in slide.shapes:
+                if hasattr(shape, "text"):
+                    texts.append(shape.text)
+        return "\n".join(texts)
+    except Exception as e:
+        logger.error(f"Error extracting text from PPTX: {e}")
+        return f"[Error extracting PPTX text: {str(e)}]"
+
+
+def run_pandas_on_attachment(history, filename, code):
+    """Execute pandas code using an attached Excel/CSV file."""
+    try:
+        from modules import dataset_tool
+        for meta in history.get('metadata', {}).values():
+            for att in meta.get('attachments', []):
+                if att.get('name') == filename and att.get('path'):
+                    return dataset_tool.execute_pandas_code(code, att['path'])
+    except Exception as e:
+        logger.error(f"Error executing pandas code: {e}")
+        return f"[Error executing pandas code: {e}]"
+
 
 
 def generate_search_query(user_message, state):
@@ -963,19 +1010,20 @@ def start_new_chat(state):
     return history
 
 
+from modules import login
+
+
 def get_history_file_path(unique_id, character, mode):
+    user = login.current_user or 'anonymous'
     if mode == 'instruct':
-        p = Path(f'user_data/logs/instruct/{unique_id}.json')
+        p = Path(f'user_data/sessions/{user}/instruct/{unique_id}.json')
     else:
-        p = Path(f'user_data/logs/chat/{character}/{unique_id}.json')
+        p = Path(f'user_data/sessions/{user}/chat/{character}/{unique_id}.json')
 
     return p
 
 
 def save_history(history, unique_id, character, mode):
-    if shared.args.multi_user:
-        return
-
     p = get_history_file_path(unique_id, character, mode)
     if not p.parent.is_dir():
         p.parent.mkdir(parents=True)
@@ -985,8 +1033,6 @@ def save_history(history, unique_id, character, mode):
 
 
 def rename_history(old_id, new_id, character, mode):
-    if shared.args.multi_user:
-        return
 
     old_p = get_history_file_path(old_id, character, mode)
     new_p = get_history_file_path(new_id, character, mode)
@@ -1003,13 +1049,15 @@ def rename_history(old_id, new_id, character, mode):
 
 def get_paths(state):
     if state['mode'] == 'instruct':
-        return Path('user_data/logs/instruct').glob('*.json')
+        user = login.current_user or 'anonymous'
+        return Path(f'user_data/sessions/{user}/instruct').glob('*.json')
     else:
         character = state['character_menu']
 
         # Handle obsolete filenames and paths
-        old_p = Path(f'user_data/logs/{character}_persistent.json')
-        new_p = Path(f'user_data/logs/persistent_{character}.json')
+        user = login.current_user or 'anonymous'
+        old_p = Path(f'user_data/sessions/{user}/chat/{character}_persistent.json')
+        new_p = Path(f'user_data/sessions/{user}/chat/persistent_{character}.json')
         if old_p.exists():
             logger.warning(f"Renaming \"{old_p}\" to \"{new_p}\"")
             old_p.rename(new_p)
@@ -1021,12 +1069,10 @@ def get_paths(state):
             p.parent.mkdir(exist_ok=True)
             new_p.rename(p)
 
-        return Path(f'user_data/logs/chat/{character}').glob('*.json')
+        return Path(f'user_data/sessions/{user}/chat/{character}').glob('*.json')
 
 
 def find_all_histories(state):
-    if shared.args.multi_user:
-        return ['']
 
     paths = get_paths(state)
     histories = sorted(paths, key=lambda x: x.stat().st_mtime, reverse=True)
@@ -1034,8 +1080,6 @@ def find_all_histories(state):
 
 
 def find_all_histories_with_first_prompts(state):
-    if shared.args.multi_user:
-        return []
 
     paths = get_paths(state)
     histories = sorted(paths, key=lambda x: x.stat().st_mtime, reverse=True)
@@ -1083,8 +1127,6 @@ def load_latest_history(state):
     mode, or the latest instruct history for instruct mode.
     '''
 
-    if shared.args.multi_user:
-        return start_new_chat(state), None
 
     histories = find_all_histories(state)
 
@@ -1113,8 +1155,6 @@ def load_history_after_deletion(state, idx):
     mode, or the latest instruct history for instruct mode.
     '''
 
-    if shared.args.multi_user:
-        return start_new_chat(state)
 
     histories = find_all_histories_with_first_prompts(state)
     idx = min(int(idx), len(histories) - 1)
@@ -1146,7 +1186,8 @@ def get_chat_state_key(character, mode):
 
 def load_last_chat_state():
     """Load the last chat state from file"""
-    state_file = Path('user_data/logs/chat_state.json')
+    user = login.current_user or 'anonymous'
+    state_file = Path(f'user_data/sessions/{user}/chat_state.json')
     if state_file.exists():
         try:
             with open(state_file, 'r', encoding='utf-8') as f:
@@ -1159,14 +1200,13 @@ def load_last_chat_state():
 
 def save_last_chat_state(character, mode, unique_id):
     """Save the last visited chat for a character/mode"""
-    if shared.args.multi_user:
-        return
 
     state = load_last_chat_state()
     key = get_chat_state_key(character, mode)
     state["last_chats"][key] = unique_id
 
-    state_file = Path('user_data/logs/chat_state.json')
+    user = login.current_user or 'anonymous'
+    state_file = Path(f'user_data/sessions/{user}/chat_state.json')
     state_file.parent.mkdir(exist_ok=True)
     with open(state_file, 'w', encoding='utf-8') as f:
         f.write(json.dumps(state, indent=2))
