@@ -44,6 +44,7 @@ def summarize_table(file_path: str, max_rows: int = 5, cell_limit: int = 80) -> 
     suffix = path.suffix.lower()
 
     if suffix == '.csv':
+        row_count = None
         df = None
         if pl:
             try:
@@ -57,10 +58,17 @@ def summarize_table(file_path: str, max_rows: int = 5, cell_limit: int = 80) -> 
                 df = None
         if df is None:
             df = pd.read_csv(path, nrows=max_rows, dtype=str)
+        try:
+            with open(path, 'r', encoding='utf-8', errors='ignore') as fh:
+                row_count = sum(1 for _ in fh) - 1
+        except Exception:
+            row_count = None
         df = _truncate_frame(df, cell_limit)
         columns = ', '.join(str(c) for c in df.columns)
         parts.append(f"Columns: {columns}")
         parts.append(df.to_csv(index=False))
+        if row_count is not None:
+            parts.append(f"Rows: {row_count}")
         parts.append(
             f"Use get_table_path('{path.name}') to load this table in Python. "
             f"Preview limited to {max_rows} rows and {cell_limit} chars per cell."
@@ -69,8 +77,14 @@ def summarize_table(file_path: str, max_rows: int = 5, cell_limit: int = 80) -> 
 
     if suffix in {'.xls', '.xlsx'}:
         xls = pd.ExcelFile(path)
+        try:
+            from openpyxl import load_workbook
+            wb = load_workbook(path, read_only=True, data_only=True)
+        except Exception:  # pragma: no cover - optional dependency
+            wb = None
         for sheet in xls.sheet_names:
             pdf = None
+            row_count = None
             if pl:
                 try:
                     pdf = pl.read_excel(path, sheet_name=sheet, n_rows=max_rows).to_pandas()
@@ -78,9 +92,18 @@ def summarize_table(file_path: str, max_rows: int = 5, cell_limit: int = 80) -> 
                     pdf = None
             if pdf is None:
                 pdf = xls.parse(sheet, nrows=max_rows)
+            if wb:
+                try:
+                    ws = wb[sheet]
+                    row_count = ws.max_row - 1
+                except Exception:
+                    row_count = None
             pdf = _truncate_frame(pdf, cell_limit)
             columns = ', '.join(str(c) for c in pdf.columns)
-            parts.append(f"Sheet: {sheet}")
+            if row_count is not None:
+                parts.append(f"Sheet: {sheet} ({row_count} rows)")
+            else:
+                parts.append(f"Sheet: {sheet}")
             parts.append(f"Columns: {columns}")
             parts.append(pdf.to_csv(index=False))
         parts.append(
@@ -91,7 +114,17 @@ def summarize_table(file_path: str, max_rows: int = 5, cell_limit: int = 80) -> 
 
     if suffix == '.parquet':
         try:
+            import pyarrow.parquet as pq  # type: ignore
+        except Exception:  # pragma: no cover
+            pq = None
+        try:
+            row_count = None
             df = None
+            if pq is not None:
+                try:
+                    row_count = pq.ParquetFile(path).metadata.num_rows
+                except Exception:
+                    row_count = None
             if pl:
                 try:
                     df = (
@@ -104,12 +137,16 @@ def summarize_table(file_path: str, max_rows: int = 5, cell_limit: int = 80) -> 
                     df = None
             if df is None:
                 df = pd.read_parquet(path)
+                if row_count is None:
+                    row_count = len(df)
                 if max_rows:
                     df = df.head(max_rows)
             df = _truncate_frame(df, cell_limit)
             columns = ', '.join(str(c) for c in df.columns)
             parts.append(f"Columns: {columns}")
             parts.append(df.to_csv(index=False))
+            if row_count is not None:
+                parts.append(f"Rows: {row_count}")
             parts.append(
                 f"Use get_table_path('{path.name}') to load this table in Python. "
                 f"Preview limited to {max_rows} rows and {cell_limit} chars per cell."
