@@ -844,12 +844,12 @@ def chatbot_wrapper(text, state, regenerate=False, _continue=False, loading_mess
                 if res.get('stdout'):
                     final_text += f"\n```\n{res['stdout']}\n```"
                 for img in res.get('images', []):
-                    # Link images through the file endpoint to avoid embedding
-                    # large base64 blobs directly in the chat. The Gradio UI
-                    # expects paths to begin with '/file/'.
+                    # Ссылаемся на сгенерированное изображение через эндпоинт
+                    # "file". Путь должен быть относительным и начинаться с
+                    # "file/", иначе интерфейс не сможет отобразить картинку.
                     try:
                         rel = quote(Path(img).as_posix())
-                        final_text += f"\n![image](/file/{rel})"
+                        final_text += f"\n![image](file/{rel})"
                     except Exception:
                         final_text += f"\n[Image saved to {img}]"
         except Exception as e:

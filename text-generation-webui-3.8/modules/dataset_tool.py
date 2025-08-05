@@ -51,7 +51,7 @@ def _preload_table(path: Path) -> None:
 
 def register_table(file_path: str | Path) -> str:
     """Register a table path and return its name identifier."""
-    path = Path(file_path)
+    path = Path(file_path).resolve()
     name = path.name
     _loaded_tables[name] = str(path)
     return name
