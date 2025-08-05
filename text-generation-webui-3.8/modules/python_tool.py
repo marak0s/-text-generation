@@ -10,15 +10,18 @@ import pandas as pd
 
 from modules import dataset_tool
 
+# Maintain execution environments per session so variables persist between runs
+_session_envs: dict[str, dict] = {}
+
 
 def execute_python(code: str, out_dir: str | Path | None = None):
     """Execute arbitrary Python code and capture stdout and generated images.
 
     Returns a dict with 'stdout' and 'images' keys. Images are file paths to
     any matplotlib figures created by the code. If ``out_dir`` is provided,
-    images are saved under that directory.
+    images are saved under that directory. Variables defined during execution
+    persist for subsequent calls within the same ``out_dir``.
     """
-    local_vars = {}
     stdout = io.StringIO()
     images: list[str] = []
     out_path = Path(out_dir).resolve() if out_dir else None
@@ -27,19 +30,21 @@ def execute_python(code: str, out_dir: str | Path | None = None):
         out_path.mkdir(parents=True, exist_ok=True)
         prev_cwd = os.getcwd()
         os.chdir(out_path)
+    # Reuse the same environment for each session directory
+    key = str(out_path) if out_path else "__default__"
+    env = _session_envs.setdefault(
+        key,
+        {
+            "plt": plt,
+            "pd": pd,
+            "get_table_path": dataset_tool.get_table_path,
+            "load_table": dataset_tool.load_table,
+        },
+    )
     try:
         with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stdout):
             try:
-                exec(
-                    code,
-                    {
-                        "plt": plt,
-                        "pd": pd,
-                        "get_table_path": dataset_tool.get_table_path,
-                        "load_table": dataset_tool.load_table,
-                    },
-                    local_vars,
-                )
+                exec(code, env)
             except Exception:
                 traceback.print_exc()
         for num in plt.get_fignums():
