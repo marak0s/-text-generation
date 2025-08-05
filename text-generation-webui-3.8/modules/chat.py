@@ -10,6 +10,7 @@ from datetime import datetime
 from functools import partial
 from pathlib import Path
 import shutil
+from urllib.parse import quote
 
 import gradio as gr
 import yaml
@@ -843,10 +844,12 @@ def chatbot_wrapper(text, state, regenerate=False, _continue=False, loading_mess
                 if res.get('stdout'):
                     final_text += f"\n```\n{res['stdout']}\n```"
                 for img in res.get('images', []):
-                    # Link images through the /file endpoint to avoid
-                    # embedding large base64 blobs directly in the chat.
+                    # Link images through the file endpoint to avoid embedding
+                    # large base64 blobs directly in the chat. The Gradio UI
+                    # expects a relative path starting with 'file/'.
                     try:
-                        final_text += f"\n![image](/file/{Path(img).as_posix()})"
+                        rel = quote(Path(img).as_posix())
+                        final_text += f"\n![image](file/{rel})"
                     except Exception:
                         final_text += f"\n[Image saved to {img}]"
         except Exception as e:

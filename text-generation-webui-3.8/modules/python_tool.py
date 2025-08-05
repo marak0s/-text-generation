@@ -22,7 +22,16 @@ def execute_python(code: str, out_dir: str | Path | None = None):
     if out_path:
         out_path.mkdir(parents=True, exist_ok=True)
     with contextlib.redirect_stdout(stdout):
-        exec(code, {"plt": plt, "pd": pd, "get_table_path": dataset_tool.get_table_path}, local_vars)
+        exec(
+            code,
+            {
+                "plt": plt,
+                "pd": pd,
+                "get_table_path": dataset_tool.get_table_path,
+                "load_table": dataset_tool.load_table,
+            },
+            local_vars,
+        )
         for num in plt.get_fignums():
             fig = plt.figure(num)
             if out_path:

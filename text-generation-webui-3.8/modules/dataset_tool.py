@@ -62,6 +62,24 @@ def get_table_path(name: str) -> str | None:
     return _loaded_tables.get(name)
 
 
+def load_table(name: str):
+    """Return a cached table by name, loading it from disk if necessary.
+
+    For Excel files, returns a dict mapping sheet names to DataFrames.
+    Raises FileNotFoundError if the table name is unknown or cannot be
+    loaded.
+    """
+    path_str = get_table_path(name)
+    if not path_str:
+        raise FileNotFoundError(f"Неизвестная таблица: {name}")
+    path = Path(path_str)
+    if name not in _table_cache:
+        _preload_table(path)
+    if name in _table_cache:
+        return _table_cache[name]
+    raise FileNotFoundError(f"Не удалось загрузить таблицу: {name}")
+
+
 def _truncate_frame(df: "pd.DataFrame", limit: int) -> "pd.DataFrame":
     """Return a copy of ``df`` with each cell truncated to ``limit`` characters."""
     if limit:
@@ -145,7 +163,7 @@ def summarize_table(file_path: str, max_rows: int = 5, cell_limit: int = 80) -> 
                 "Уникальные значения: " + ", ".join(f"{k}={v}" for k, v in uniques.items())
             )
         parts.append(
-            f"Используйте get_table_path('{path.name}') для загрузки полной таблицы в Python. "
+            f"Используйте load_table('{path.name}') для загрузки полной таблицы (или get_table_path('{path.name}') для пути). "
             "Всегда проверяйте df.dtypes и при необходимости преобразуйте столбцы (например, pd.to_datetime) перед фильтрацией. "
             "Заключайте анализ в блоки ```python```. "
             f"Предпросмотр ограничен {max_rows} строками и {cell_limit} символами в ячейке."
@@ -197,7 +215,7 @@ def summarize_table(file_path: str, max_rows: int = 5, cell_limit: int = 80) -> 
                     "Уникальные значения: " + ", ".join(f"{k}={v}" for k, v in uniques.items())
                 )
         parts.append(
-            f"Используйте get_table_path('{path.name}') для загрузки полной таблицы в Python. "
+            f"Используйте load_table('{path.name}') для загрузки полной таблицы (или get_table_path('{path.name}') для пути). "
             "Всегда проверяйте df.dtypes и при необходимости преобразуйте столбцы (например, pd.to_datetime) перед фильтрацией. "
             "Заключайте анализ в блоки ```python```. "
             f"Предпросмотр ограничен {max_rows} строками и {cell_limit} символами в ячейке."
@@ -254,7 +272,7 @@ def summarize_table(file_path: str, max_rows: int = 5, cell_limit: int = 80) -> 
                     "Уникальные значения: " + ", ".join(f"{k}={v}" for k, v in uniques.items())
                 )
             parts.append(
-                f"Используйте get_table_path('{path.name}') для загрузки полной таблицы в Python. "
+                f"Используйте load_table('{path.name}') для загрузки полной таблицы (или get_table_path('{path.name}') для пути). "
                 "Всегда проверяйте df.dtypes и при необходимости преобразуйте столбцы (например, pd.to_datetime) перед фильтрацией. "
                 "Заключайте анализ в блоки ```python```. "
                 f"Предпросмотр ограничен {max_rows} строками и {cell_limit} символами в ячейке."
@@ -277,6 +295,7 @@ def answer_question_with_pandas(question: str, file_path: str | Path) -> str:
         f"Предпросмотр таблицы `{table_name}`:\n{summary}\n\n"
         f"Вопрос: {question}\n"
         "Напишите код на pandas, чтобы ответить на вопрос, используя всю таблицу. "
+        f"Получите DataFrame через load_table('{table_name}'). "
         "Перед фильтрацией посмотрите df.dtypes и при необходимости преобразуйте столбцы (например, pd.to_datetime). "
         "Сохраните ответ в переменную `result` и отвечайте на том же языке, что и вопрос."
     )
