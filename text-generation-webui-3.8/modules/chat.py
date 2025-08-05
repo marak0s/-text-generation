@@ -843,12 +843,10 @@ def chatbot_wrapper(text, state, regenerate=False, _continue=False, loading_mess
                 if res.get('stdout'):
                     final_text += f"\n```\n{res['stdout']}\n```"
                 for img in res.get('images', []):
-                    # Inline images directly in the message using base64. The
-                    # interface reliably displays embedded data URIs even when
-                    # static file serving is unavailable.
+                    # Link images through the /file endpoint to avoid
+                    # embedding large base64 blobs directly in the chat.
                     try:
-                        b64 = base64.b64encode(Path(img).read_bytes()).decode('ascii')
-                        final_text += f"\n![image](data:image/png;base64,{b64})"
+                        final_text += f"\n![image](/file/{Path(img).as_posix()})"
                     except Exception:
                         final_text += f"\n[Image saved to {img}]"
         except Exception as e:

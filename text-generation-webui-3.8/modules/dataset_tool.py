@@ -16,6 +16,39 @@ _loaded_tables: dict[str, str] = {}
 _table_cache: dict[str, "pd.DataFrame"] = {}
 
 
+def _preload_table(path: Path) -> None:
+    """Load the entire table into cache so pandas queries use full data."""
+    name = path.name
+    if name in _table_cache:
+        return
+    try:
+        suffix = path.suffix.lower()
+        if suffix == '.csv':
+            if pl:
+                _table_cache[name] = pl.read_csv(path).to_pandas()
+            else:
+                _table_cache[name] = pd.read_csv(path, low_memory=False)
+        elif suffix in {'.xls', '.xlsx'}:
+            xls = pd.ExcelFile(path)
+            sheets = {}
+            for sheet in xls.sheet_names:
+                if pl:
+                    try:
+                        sheets[sheet] = pl.read_excel(path, sheet_name=sheet).to_pandas()
+                    except Exception:
+                        sheets[sheet] = xls.parse(sheet)
+                else:
+                    sheets[sheet] = xls.parse(sheet)
+            _table_cache[name] = sheets
+        elif suffix == '.parquet':
+            if pl:
+                _table_cache[name] = pl.read_parquet(path).to_pandas()
+            else:
+                _table_cache[name] = pd.read_parquet(path)
+    except Exception:
+        pass
+
+
 def register_table(file_path: str | Path) -> str:
     """Register a table path and return its name identifier."""
     path = Path(file_path)
@@ -59,11 +92,11 @@ def _count_uniques_csv(path: Path, columns) -> dict[str, int]:
 def summarize_table(file_path: str, max_rows: int = 5, cell_limit: int = 80) -> str:
     """Return a lightweight textual preview of an Excel, CSV or Parquet table."""
     if pd is None:
-        return '[pandas not installed]'
+        return '[pandas не установлен]'
     path = Path(file_path)
     # Register the table so ``get_table_path`` can resolve it later
     register_table(path)
-    parts = [f"Table: {path.name}"]
+    parts = [f"Таблица: {path.name}"]
     suffix = path.suffix.lower()
 
     if suffix == '.csv':
@@ -71,7 +104,7 @@ def summarize_table(file_path: str, max_rows: int = 5, cell_limit: int = 80) -> 
         df = None
         if pl:
             try:
-                scan = pl.scan_csv(path, ignore_errors=True)
+                scan = pl.scan_csv(path)
                 df = scan.head(max_rows).collect().to_pandas()
                 uniq_df = (
                     scan.select([pl.col(c).n_unique().alias(str(c)) for c in df.columns])
@@ -102,21 +135,22 @@ def summarize_table(file_path: str, max_rows: int = 5, cell_limit: int = 80) -> 
             row_count = None
         df = _truncate_frame(df, cell_limit)
         columns = ', '.join(str(c) for c in df.columns)
-        parts.append(f"Columns: {columns}")
-        parts.append("Dtypes: " + ", ".join(f"{k}={v}" for k, v in types.items()))
+        parts.append(f"Столбцы: {columns}")
+        parts.append("Типы: " + ", ".join(f"{k}={v}" for k, v in types.items()))
         parts.append(df.to_csv(index=False))
         if row_count is not None:
-            parts.append(f"Rows: {row_count}")
+            parts.append(f"Строки: {row_count}")
         if uniques:
             parts.append(
-                "Unique values: " + ", ".join(f"{k}={v}" for k, v in uniques.items())
+                "Уникальные значения: " + ", ".join(f"{k}={v}" for k, v in uniques.items())
             )
         parts.append(
-            f"Use get_table_path('{path.name}') to load the full table in Python. "
-            "Always inspect df.dtypes and convert columns (e.g. with pd.to_datetime) before filtering. "
-            "Enclose analysis in ```python``` blocks. "
-            f"Preview limited to {max_rows} rows and {cell_limit} chars per cell."
+            f"Используйте get_table_path('{path.name}') для загрузки полной таблицы в Python. "
+            "Всегда проверяйте df.dtypes и при необходимости преобразуйте столбцы (например, pd.to_datetime) перед фильтрацией. "
+            "Заключайте анализ в блоки ```python```. "
+            f"Предпросмотр ограничен {max_rows} строками и {cell_limit} символами в ячейке."
         )
+        _preload_table(path)
         return "\n".join(parts)
 
     if suffix in {'.xls', '.xlsx'}:
@@ -152,22 +186,23 @@ def summarize_table(file_path: str, max_rows: int = 5, cell_limit: int = 80) -> 
             pdf = _truncate_frame(pdf, cell_limit)
             columns = ', '.join(str(c) for c in pdf.columns)
             if row_count is not None:
-                parts.append(f"Sheet: {sheet} ({row_count} rows)")
+                parts.append(f"Лист: {sheet} ({row_count} строк)")
             else:
-                parts.append(f"Sheet: {sheet}")
-            parts.append(f"Columns: {columns}")
-            parts.append("Dtypes: " + ", ".join(f"{k}={v}" for k, v in types.items()))
+                parts.append(f"Лист: {sheet}")
+            parts.append(f"Столбцы: {columns}")
+            parts.append("Типы: " + ", ".join(f"{k}={v}" for k, v in types.items()))
             parts.append(pdf.to_csv(index=False))
             if uniques:
                 parts.append(
-                    "Unique values: " + ", ".join(f"{k}={v}" for k, v in uniques.items())
+                    "Уникальные значения: " + ", ".join(f"{k}={v}" for k, v in uniques.items())
                 )
         parts.append(
-            f"Use get_table_path('{path.name}') to load the full table in Python. "
-            "Always inspect df.dtypes and convert columns (e.g. with pd.to_datetime) before filtering. "
-            "Enclose analysis in ```python``` blocks. "
-            f"Preview limited to {max_rows} rows and {cell_limit} chars per cell."
+            f"Используйте get_table_path('{path.name}') для загрузки полной таблицы в Python. "
+            "Всегда проверяйте df.dtypes и при необходимости преобразуйте столбцы (например, pd.to_datetime) перед фильтрацией. "
+            "Заключайте анализ в блоки ```python```. "
+            f"Предпросмотр ограничен {max_rows} строками и {cell_limit} символами в ячейке."
         )
+        _preload_table(path)
         return "\n".join(parts)
 
     if suffix == '.parquet':
@@ -209,40 +244,41 @@ def summarize_table(file_path: str, max_rows: int = 5, cell_limit: int = 80) -> 
             types = df.dtypes.astype(str).to_dict()
             df = _truncate_frame(df, cell_limit)
             columns = ', '.join(str(c) for c in df.columns)
-            parts.append(f"Columns: {columns}")
-            parts.append("Dtypes: " + ", ".join(f"{k}={v}" for k, v in types.items()))
+            parts.append(f"Столбцы: {columns}")
+            parts.append("Типы: " + ", ".join(f"{k}={v}" for k, v in types.items()))
             parts.append(df.to_csv(index=False))
             if row_count is not None:
-                parts.append(f"Rows: {row_count}")
+                parts.append(f"Строки: {row_count}")
             if uniques:
                 parts.append(
-                    "Unique values: " + ", ".join(f"{k}={v}" for k, v in uniques.items())
+                    "Уникальные значения: " + ", ".join(f"{k}={v}" for k, v in uniques.items())
                 )
             parts.append(
-                f"Use get_table_path('{path.name}') to load the full table in Python. "
-                "Always inspect df.dtypes and convert columns (e.g. with pd.to_datetime) before filtering. "
-                "Enclose analysis in ```python``` blocks. "
-                f"Preview limited to {max_rows} rows and {cell_limit} chars per cell."
+                f"Используйте get_table_path('{path.name}') для загрузки полной таблицы в Python. "
+                "Всегда проверяйте df.dtypes и при необходимости преобразуйте столбцы (например, pd.to_datetime) перед фильтрацией. "
+                "Заключайте анализ в блоки ```python```. "
+                f"Предпросмотр ограничен {max_rows} строками и {cell_limit} символами в ячейке."
             )
+            _preload_table(path)
             return "\n".join(parts)
         except Exception as e:
-            return f"[Error reading parquet: {e}]"
+            return f"[Ошибка чтения parquet: {e}]"
 
-    raise ValueError('Unsupported file type: %s' % path.suffix)
+    raise ValueError('Неподдерживаемый тип файла: %s' % path.suffix)
 
 
 def answer_question_with_pandas(question: str, file_path: str | Path) -> str:
     """Return a prompt for an LLM to generate pandas code."""
     if pd is None:
-        raise RuntimeError('pandas is required for table questions')
+        raise RuntimeError('Для работы с таблицами требуется pandas')
     table_name = register_table(file_path)
     summary = summarize_table(file_path)
     prompt = (
-        f"Table `{table_name}` preview:\n{summary}\n\n"
-        f"Question: {question}\n"
-        "Write pandas code to answer the question using the full table. "
-        "Inspect df.dtypes and cast columns (e.g. pd.to_datetime) before filtering. "
-        "Store the answer in the variable `result` and reply in the same language as the question."
+        f"Предпросмотр таблицы `{table_name}`:\n{summary}\n\n"
+        f"Вопрос: {question}\n"
+        "Напишите код на pandas, чтобы ответить на вопрос, используя всю таблицу. "
+        "Перед фильтрацией посмотрите df.dtypes и при необходимости преобразуйте столбцы (например, pd.to_datetime). "
+        "Сохраните ответ в переменную `result` и отвечайте на том же языке, что и вопрос."
     )
     return prompt
 
@@ -250,21 +286,21 @@ def answer_question_with_pandas(question: str, file_path: str | Path) -> str:
 def execute_pandas_code(
     code: str,
     file_path: str | Path | None,
-    max_output_rows: int | None = 20,
+    max_output_rows: int | None = 100,
     cell_limit: int = 80,
 ) -> str:
     """Execute pandas code against the provided table and return the result."""
     if pd is None:
-        return 'pandas is required'
+        return 'требуется pandas'
     if not file_path:
-        return 'No file path provided'
+        return 'Не указан путь к файлу'
     path = Path(file_path)
     if not path.exists():
         alt = get_table_path(path.name)
         if alt:
             path = Path(alt)
         else:
-            return f'File not found: {path}'
+            return f'Файл не найден: {path}'
     suffix = path.suffix.lower()
     local_vars = {}
     name = path.name
@@ -276,7 +312,7 @@ def execute_pandas_code(
             else:
                 if pl:
                     try:
-                        df = pl.scan_csv(path, ignore_errors=True).collect().to_pandas()
+                        df = pl.scan_csv(path).collect().to_pandas()
                     except Exception:
                         df = pd.read_csv(path, low_memory=False)
                 else:
@@ -312,11 +348,11 @@ def execute_pandas_code(
                     else:
                         df = pd.read_parquet(path)
                 except Exception as e:
-                    return f'Error reading parquet: {e}'
+                    return f'Ошибка чтения parquet: {e}'
                 _table_cache[name] = df
                 local_vars['df'] = df
         else:
-            return f'Unsupported file type: {path.suffix}'
+            return f'Неподдерживаемый тип файла: {path.suffix}'
 
         exec(code, {'pd': pd}, local_vars)
         result = local_vars.get('result')
@@ -327,14 +363,14 @@ def execute_pandas_code(
                 )
                 return f"{head}\n... ({len(result) - max_output_rows} more rows)"
             return _truncate_frame(result, cell_limit).to_csv(index=False)
-        return str(result) if result is not None else 'No result'
+        return str(result) if result is not None else 'Нет результата'
     except Exception as e:
-        return f'Error executing code: {e}'
+        return f'Ошибка выполнения кода: {e}'
 
 
 def execute_pandas_code_by_name(code: str, table_name: str) -> str:
     """Execute code using a previously registered table name."""
     path = get_table_path(table_name)
     if not path:
-        return f'Unknown table: {table_name}'
+        return f'Неизвестная таблица: {table_name}'
     return execute_pandas_code(code, path)
