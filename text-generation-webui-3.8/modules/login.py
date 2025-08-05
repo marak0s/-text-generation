@@ -65,6 +65,7 @@ def create_login_ui(login_block, interface_block):
         password = gr.Textbox(label='Password', type='password')
         login_btn = gr.Button('Login')
         msg = gr.HTML()
+        success = gr.State(False)
 
         def do_login(u, p, request: gr.Request):
             global current_user
@@ -72,10 +73,30 @@ def create_login_ui(login_block, interface_block):
                 current_user = u
                 _session_users[request.session_hash] = u
                 load_user_settings(u)
-                return gr.update(visible=False), gr.update(visible=True), ''
-            return gr.update(), gr.update(), '<span style="color:red">Invalid credentials</span>'
+                return (
+                    gr.update(visible=False),
+                    gr.update(visible=True),
+                    '',
+                    True,
+                )
+            return (
+                gr.update(),
+                gr.update(),
+                '<span style="color:red">Invalid credentials</span>',
+                False,
+            )
 
-        (login_btn.click(do_login, [username, password], [login_block, interface_block, msg])
-                  .then(None, None, None, js='() => {window.dispatchEvent(new Event("resize"));}'))
+        (
+            login_btn.click(
+                do_login,
+                [username, password],
+                [login_block, interface_block, msg, success],
+            ).then(
+                None,
+                success,
+                None,
+                js='(s) => {window.dispatchEvent(new Event("resize")); if (s) window.location.reload();}',
+            )
+        )
     return
 

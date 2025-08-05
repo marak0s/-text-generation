@@ -212,10 +212,9 @@ def summarize_table(file_path: str, max_rows: int = 5, cell_limit: int = 80) -> 
             types = pdf.dtypes.astype(str).to_dict()
             pdf = _truncate_frame(pdf, cell_limit)
             columns = ', '.join(str(c) for c in pdf.columns)
+            parts.append(f"Лист: {sheet}")
             if row_count is not None:
-                parts.append(f"Лист: {sheet} ({row_count} строк)")
-            else:
-                parts.append(f"Лист: {sheet}")
+                parts.append(f"Строки: {row_count}")
             parts.append(f"Столбцы: {columns}")
             parts.append("Типы: " + ", ".join(f"{k}={v}" for k, v in types.items()))
             if any(str(c).startswith('Unnamed') or str(c).isdigit() for c in pdf.columns):
