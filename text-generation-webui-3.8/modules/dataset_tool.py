@@ -164,9 +164,9 @@ def summarize_table(file_path: str, max_rows: int = 5, cell_limit: int = 80) -> 
             )
         parts.append(
             f"Используйте load_table('{path.name}') для загрузки полной таблицы (или get_table_path('{path.name}') для пути). "
+            f"Предпросмотр ограничен {max_rows} строками и {cell_limit} символами в ячейке, поэтому не делайте по нему выводов. "
             "Всегда проверяйте df.dtypes и при необходимости преобразуйте столбцы (например, pd.to_datetime) перед фильтрацией. "
-            "Заключайте анализ в блоки ```python```. "
-            f"Предпросмотр ограничен {max_rows} строками и {cell_limit} символами в ячейке."
+            "Заключайте анализ в блоки ```python```."
         )
         _preload_table(path)
         return "\n".join(parts)
@@ -216,9 +216,9 @@ def summarize_table(file_path: str, max_rows: int = 5, cell_limit: int = 80) -> 
                 )
         parts.append(
             f"Используйте load_table('{path.name}') для загрузки полной таблицы (или get_table_path('{path.name}') для пути). "
+            f"Предпросмотр ограничен {max_rows} строками и {cell_limit} символами в ячейке, поэтому не делайте по нему выводов. "
             "Всегда проверяйте df.dtypes и при необходимости преобразуйте столбцы (например, pd.to_datetime) перед фильтрацией. "
-            "Заключайте анализ в блоки ```python```. "
-            f"Предпросмотр ограничен {max_rows} строками и {cell_limit} символами в ячейке."
+            "Заключайте анализ в блоки ```python```."
         )
         _preload_table(path)
         return "\n".join(parts)
@@ -273,9 +273,9 @@ def summarize_table(file_path: str, max_rows: int = 5, cell_limit: int = 80) -> 
                 )
             parts.append(
                 f"Используйте load_table('{path.name}') для загрузки полной таблицы (или get_table_path('{path.name}') для пути). "
+                f"Предпросмотр ограничен {max_rows} строками и {cell_limit} символами в ячейке, поэтому не делайте по нему выводов. "
                 "Всегда проверяйте df.dtypes и при необходимости преобразуйте столбцы (например, pd.to_datetime) перед фильтрацией. "
-                "Заключайте анализ в блоки ```python```. "
-                f"Предпросмотр ограничен {max_rows} строками и {cell_limit} символами в ячейке."
+                "Заключайте анализ в блоки ```python```."
             )
             _preload_table(path)
             return "\n".join(parts)
@@ -294,9 +294,9 @@ def answer_question_with_pandas(question: str, file_path: str | Path) -> str:
     prompt = (
         f"Предпросмотр таблицы `{table_name}`:\n{summary}\n\n"
         f"Вопрос: {question}\n"
-        "Напишите код на pandas, чтобы ответить на вопрос, используя всю таблицу. "
-        f"Получите DataFrame через load_table('{table_name}'). "
-        "Перед фильтрацией посмотрите df.dtypes и при необходимости преобразуйте столбцы (например, pd.to_datetime). "
+        "Ответ должен опираться на полный набор данных, а не на предпросмотр. "
+        f"Получите DataFrame через load_table('{table_name}') (не используйте pd.read_* по пути файла). "
+        "Перед фильтрацией проверьте df.dtypes и при необходимости преобразуйте столбцы, например pd.to_datetime. "
         "Сохраните ответ в переменную `result` и отвечайте на том же языке, что и вопрос."
     )
     return prompt
