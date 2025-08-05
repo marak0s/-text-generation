@@ -1,4 +1,5 @@
 from pathlib import Path
+import re
 
 try:  # pragma: no cover - pandas is an optional dependency at runtime
     import pandas as pd
@@ -50,10 +51,18 @@ def _preload_table(path: Path) -> None:
 
 
 def register_table(file_path: str | Path) -> str:
-    """Register a table path and return its name identifier."""
+    """Register a table path and return its name identifier.
+
+    Besides the exact file name, a secondary alias without leading digits
+    and separators is registered. This allows referencing files like
+    ``"1_2 - LeadTime.parquet"`` simply as ``"LeadTime.parquet"``.
+    """
     path = Path(file_path).resolve()
     name = path.name
     _loaded_tables[name] = str(path)
+    alias = re.sub(r'^[\s\-_\d]+', '', name)
+    if alias != name and alias not in _loaded_tables:
+        _loaded_tables[alias] = str(path)
     return name
 
 
