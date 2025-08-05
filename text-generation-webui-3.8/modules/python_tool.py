@@ -1,7 +1,10 @@
 import io
 import contextlib
+import os
 import tempfile
+import traceback
 from pathlib import Path
+
 import matplotlib.pyplot as plt
 import pandas as pd
 
@@ -18,20 +21,27 @@ def execute_python(code: str, out_dir: str | Path | None = None):
     local_vars = {}
     stdout = io.StringIO()
     images: list[str] = []
-    out_path = Path(out_dir) if out_dir else None
+    out_path = Path(out_dir).resolve() if out_dir else None
+    prev_cwd = None
     if out_path:
         out_path.mkdir(parents=True, exist_ok=True)
-    with contextlib.redirect_stdout(stdout):
-        exec(
-            code,
-            {
-                "plt": plt,
-                "pd": pd,
-                "get_table_path": dataset_tool.get_table_path,
-                "load_table": dataset_tool.load_table,
-            },
-            local_vars,
-        )
+        prev_cwd = os.getcwd()
+        os.chdir(out_path)
+    try:
+        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stdout):
+            try:
+                exec(
+                    code,
+                    {
+                        "plt": plt,
+                        "pd": pd,
+                        "get_table_path": dataset_tool.get_table_path,
+                        "load_table": dataset_tool.load_table,
+                    },
+                    local_vars,
+                )
+            except Exception:
+                traceback.print_exc()
         for num in plt.get_fignums():
             fig = plt.figure(num)
             if out_path:
@@ -43,4 +53,7 @@ def execute_python(code: str, out_dir: str | Path | None = None):
             fig.savefig(path)
             plt.close(fig)
             images.append(str(path))
+    finally:
+        if prev_cwd is not None:
+            os.chdir(prev_cwd)
     return {"stdout": stdout.getvalue(), "images": images}
