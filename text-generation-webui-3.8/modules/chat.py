@@ -10,6 +10,7 @@ from datetime import datetime
 from functools import partial
 from pathlib import Path
 import shutil
+from urllib.parse import quote
 
 import gradio as gr
 import yaml
@@ -843,7 +844,14 @@ def chatbot_wrapper(text, state, regenerate=False, _continue=False, loading_mess
                 if res.get('stdout'):
                     final_text += f"\n```\n{res['stdout']}\n```"
                 for img in res.get('images', []):
-                    final_text += f"\n![image]({img})"
+                    # Ссылаемся на сгенерированное изображение через эндпоинт
+                    # "/file". Для корректной загрузки слэши не должны быть
+                    # URL-кодированы, поэтому передаём safe="/".
+                    try:
+                        rel = quote(Path(img).as_posix(), safe="/")
+                        final_text += f"\n![image](/file/{rel})"
+                    except Exception:
+                        final_text += f"\n[Image saved to {img}]"
         except Exception as e:
             logger.error(f"Python tool execution error: {e}")
     output['internal'][-1][1] = final_text
