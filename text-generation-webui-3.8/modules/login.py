@@ -7,11 +7,23 @@ from modules import shared, ui
 
 _users = {}
 current_user = None
+# Map Gradio session hashes to logged-in usernames so multiple users can
+# interact with the server without clobbering each other's state.
+_session_users: dict[str, str] = {}
 
 
-def get_user_settings_path(user: str | None = None) -> Path:
-    """Return the settings.yaml path for the given user."""
-    user = user or current_user or 'anonymous'
+def get_session_user(request: gr.Request | None = None) -> str:
+    """Return the username associated with the current Gradio session."""
+    if request is not None:
+        return _session_users.get(request.session_hash, 'anonymous')
+    return current_user or 'anonymous'
+
+
+def get_user_settings_path(
+    user: str | None = None, request: gr.Request | None = None
+) -> Path:
+    """Return the settings.yaml path for the given user or session."""
+    user = user or get_session_user(request)
     return Path(f'user_data/sessions/{user}/settings.yaml')
 
 
@@ -54,10 +66,11 @@ def create_login_ui(login_block, interface_block):
         login_btn = gr.Button('Login')
         msg = gr.HTML()
 
-        def do_login(u, p):
+        def do_login(u, p, request: gr.Request):
             global current_user
             if verify_user(u, p):
                 current_user = u
+                _session_users[request.session_hash] = u
                 load_user_settings(u)
                 return gr.update(visible=False), gr.update(visible=True), ''
             return gr.update(), gr.update(), '<span style="color:red">Invalid credentials</span>'

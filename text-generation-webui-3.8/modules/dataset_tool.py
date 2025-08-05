@@ -218,6 +218,10 @@ def summarize_table(file_path: str, max_rows: int = 5, cell_limit: int = 80) -> 
                 parts.append(f"Лист: {sheet}")
             parts.append(f"Столбцы: {columns}")
             parts.append("Типы: " + ", ".join(f"{k}={v}" for k, v in types.items()))
+            if any(str(c).startswith('Unnamed') or str(c).isdigit() for c in pdf.columns):
+                parts.append(
+                    "Похоже, заголовки не распознаны. При чтении может потребоваться параметр header, чтобы пропустить лишние строки."
+                )
             parts.append(pdf.to_csv(index=False))
             if uniques:
                 parts.append(
