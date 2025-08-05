@@ -849,7 +849,7 @@ def chatbot_wrapper(text, state, regenerate=False, _continue=False, loading_mess
                     # URL-кодированы, поэтому передаём safe="/".
                     try:
                         rel = quote(Path(img).as_posix(), safe="/")
-                        final_text += f"\n![image](/file/{rel})"
+                        final_text += f'\n<img src="/file/{rel}" alt="image">'
                     except Exception:
                         final_text += f"\n[Image saved to {img}]"
         except Exception as e:
@@ -860,6 +860,10 @@ def chatbot_wrapper(text, state, regenerate=False, _continue=False, loading_mess
     else:
         visible = final_text
     visible = html.escape(visible)
+    # Преобразуем возможные теги изображений, которые были экранированы,
+    # обратно в валидный HTML, чтобы картинки отображались в интерфейсе.
+    visible = re.sub(r'&lt;img src=&quot;([^&]*)&quot; alt=&quot;image&quot;&gt;',
+                     r'<img src="\1" alt="image">', visible)
     output['visible'][-1][1] = apply_extensions('output', visible, state, is_chat=True)
 
     # Final sync for version metadata (in case streaming was disabled)
