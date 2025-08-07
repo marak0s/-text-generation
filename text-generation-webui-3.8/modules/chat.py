@@ -1112,7 +1112,7 @@ def rename_history(old_id, new_id, character, mode, user: str):
 
 
 def get_paths(state):
-    user = state.get('user', getattr(login, 'current_user', 'anonymous'))
+    user = state.get('user', 'anonymous')
     if state['mode'] == 'instruct':
         return Path(f'user_data/sessions/{user}/instruct').glob('*.json')
     else:

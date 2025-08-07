@@ -49,9 +49,9 @@ def create_ui():
                 None, None, None, js='() => {document.body.innerHTML=\'<h1 style="font-family:monospace;padding-top:20%;margin:0;height:100vh;color:lightgray;text-align:center;background:var(--body-background-fill)">Reloading...</h1>\'; setTimeout(function(){location.reload()},2500); return []}')
 
 
-def handle_save_settings(state, preset, extensions, show_controls, theme):
+def handle_save_settings(state, preset, extensions, show_controls, theme, request: gr.Request | None = None):
     contents = ui.save_settings(state, preset, extensions, show_controls, theme, manual_save=True)
-    path = login.get_user_settings_path()
+    path = login.get_user_settings_path(state.get('user'), request)
     return [
         contents,
         path.name,
