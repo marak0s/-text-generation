@@ -349,60 +349,20 @@ def execute_pandas_code(
             path = Path(alt)
         else:
             return f'Файл не найден: {path}'
-    suffix = path.suffix.lower()
+
+    # Register the table so ``load_table`` can resolve it by name
+    register_table(path)
+
+    if 'pd.read_' in code:
+        return 'Используйте load_table() вместо pd.read_* для чтения данных'
+
     local_vars = {}
-    name = path.name
-
     try:
-        if suffix == '.csv':
-            if name in _table_cache:
-                local_vars['df'] = _table_cache[name]
-            else:
-                if pl:
-                    try:
-                        df = pl.scan_csv(path).collect().to_pandas()
-                    except Exception:
-                        df = pd.read_csv(path, low_memory=False)
-                else:
-                    df = pd.read_csv(path, low_memory=False)
-                _table_cache[name] = df
-                local_vars['df'] = df
-        elif suffix in {'.xls', '.xlsx'}:
-            if name in _table_cache:
-                sheets = _table_cache[name]
-            else:
-                xls = pd.ExcelFile(path)
-                sheets = {}
-                for sheet in xls.sheet_names:
-                    if pl:
-                        try:
-                            sheets[sheet] = pl.read_excel(path, sheet_name=sheet).to_pandas()
-                        except Exception:
-                            sheets[sheet] = xls.parse(sheet)
-                    else:
-                        sheets[sheet] = xls.parse(sheet)
-                _table_cache[name] = sheets
-            local_vars.update(sheets)
-        elif suffix == '.parquet':
-            if name in _table_cache:
-                local_vars['df'] = _table_cache[name]
-            else:
-                try:
-                    if pl:
-                        try:
-                            df = pl.scan_parquet(path).collect().to_pandas()
-                        except Exception:
-                            df = pd.read_parquet(path)
-                    else:
-                        df = pd.read_parquet(path)
-                except Exception as e:
-                    return f'Ошибка чтения parquet: {e}'
-                _table_cache[name] = df
-                local_vars['df'] = df
-        else:
-            return f'Неподдерживаемый тип файла: {path.suffix}'
-
-        exec(code, {'pd': pd}, local_vars)
+        exec(
+            code,
+            {'pd': pd, 'load_table': load_table, 'get_table_path': get_table_path},
+            local_vars,
+        )
         result = local_vars.get('result')
         if isinstance(result, pd.DataFrame):
             if max_output_rows is not None and len(result) > max_output_rows:

@@ -7,6 +7,9 @@ from modules import shared
 from modules.block_requests import OpenMonkeyPatch, RequestBlocker
 from modules.logging_colors import logger
 
+# Always launch in instruct mode regardless of saved settings
+shared.settings['mode'] = 'instruct'
+
 # Set up Gradio temp directory path
 gradio_temp_path = Path('user_data') / 'cache' / 'gradio'
 shutil.rmtree(gradio_temp_path, ignore_errors=True)
