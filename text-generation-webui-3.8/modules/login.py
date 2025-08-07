@@ -26,6 +26,16 @@ except Exception:  # pragma: no cover - fallback to in-process sessions
 def get_session_user(request: gr.Request | None = None) -> str:
     """Return the username associated with the current Gradio session."""
     if request is not None:
+        try:
+            # Prefer user information stored in the browser cookies so that
+            # sessions survive page reloads and different session hashes.
+            if hasattr(request, "cookies"):
+                cookie_user = request.cookies.get("user")
+                if cookie_user:
+                    return cookie_user
+        except Exception:
+            # Fall back to the in-memory/session based mapping
+            pass
         user = load_session_data(request.session_hash)
         return user or "anonymous"
     return "anonymous"
@@ -97,6 +107,7 @@ def create_login_ui(login_block, interface_block):
         login_btn = gr.Button('Login')
         msg = gr.HTML()
         success = gr.State(False)
+        cookie = gr.State()
 
         def do_login(u, p, request: gr.Request):
             if verify_user(u, p):
@@ -107,19 +118,21 @@ def create_login_ui(login_block, interface_block):
                     gr.update(visible=True),
                     '',
                     True,
+                    gr.set_cookie('user', u),
                 )
             return (
                 gr.update(),
                 gr.update(),
                 '<span style="color:red">Invalid credentials</span>',
                 False,
+                None,
             )
 
         (
             login_btn.click(
                 do_login,
                 [username, password],
-                [login_block, interface_block, msg, success],
+                [login_block, interface_block, msg, success, cookie],
             ).then(
                 None,
                 success,
