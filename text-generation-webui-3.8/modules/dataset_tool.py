@@ -71,10 +71,13 @@ def get_table_path(name: str) -> str | None:
     return _loaded_tables.get(name)
 
 
-def load_table(name: str):
+def load_table(name: str, sheet_name: str | None = None):
     """Return a cached table by name, loading it from disk if necessary.
 
-    For Excel files, returns a dict mapping sheet names to DataFrames.
+    For Excel files, returns a single sheet :class:`pandas.DataFrame`. If the
+    workbook contains multiple sheets, ``sheet_name`` must be provided to
+    select one; otherwise an informative error is raised.
+
     Raises FileNotFoundError if the table name is unknown or cannot be
     loaded.
     """
@@ -85,7 +88,21 @@ def load_table(name: str):
     if name not in _table_cache:
         _preload_table(path)
     if name in _table_cache:
-        return _table_cache[name]
+        data = _table_cache[name]
+        if isinstance(data, dict):
+            if sheet_name:
+                try:
+                    return data[sheet_name]
+                except KeyError:
+                    raise FileNotFoundError(
+                        f"Лист '{sheet_name}' не найден в {name}"
+                    )
+            if len(data) == 1:
+                return next(iter(data.values()))
+            raise ValueError(
+                f"В {name} несколько листов. Укажите sheet_name."
+            )
+        return data
     raise FileNotFoundError(f"Не удалось загрузить таблицу: {name}")
 
 
@@ -227,7 +244,7 @@ def summarize_table(file_path: str, max_rows: int = 5, cell_limit: int = 80) -> 
                     "Уникальные значения: " + ", ".join(f"{k}={v}" for k, v in uniques.items())
                 )
         parts.append(
-            f"Используйте load_table('{path.name}') для загрузки полной таблицы (или get_table_path('{path.name}') для пути). "
+            f"Используйте load_table('{path.name}', sheet_name='ИмяЛиста') для загрузки полной таблицы (или get_table_path('{path.name}') для пути). "
             f"Предпросмотр ограничен {max_rows} строками и {cell_limit} символами в ячейке, поэтому не делайте по нему выводов. "
             "Всегда проверяйте df.dtypes и при необходимости преобразуйте столбцы (например, pd.to_datetime) перед фильтрацией. "
             "Заключайте анализ в блоки ```python```."
@@ -307,7 +324,7 @@ def answer_question_with_pandas(question: str, file_path: str | Path) -> str:
         f"Предпросмотр таблицы `{table_name}`:\n{summary}\n\n"
         f"Вопрос: {question}\n"
         "Ответ должен опираться на полный набор данных, а не на предпросмотр. "
-        f"Получите DataFrame через load_table('{table_name}') (не используйте pd.read_* по пути файла). "
+        f"Получите DataFrame через load_table('{table_name}', sheet_name='ИмяЛиста' при необходимости) (не используйте pd.read_* по пути файла). "
         "Перед фильтрацией проверьте df.dtypes и при необходимости преобразуйте столбцы, например pd.to_datetime. "
         "Сохраните ответ в переменную `result` и отвечайте на том же языке, что и вопрос."
     )

@@ -81,6 +81,8 @@ def load_user_settings(user: str) -> None:
         try:
             with open(settings_path, 'r', encoding='utf-8') as f:
                 new_settings = yaml.safe_load(f.read()) or {}
+            # Always start in instruct mode regardless of saved value
+            new_settings['mode'] = 'instruct'
             shared.settings.update(new_settings)
             ui_updates = ui.apply_interface_values(new_settings)
             for name, update in zip(ui.list_interface_input_elements(), ui_updates):
@@ -88,6 +90,11 @@ def load_user_settings(user: str) -> None:
                     shared.gradio[name].update(update)
         except Exception:
             pass
+    else:
+        # Ensure instruct mode even if no settings file exists
+        shared.settings['mode'] = 'instruct'
+        if 'mode' in shared.gradio:
+            shared.gradio['mode'].update(value='instruct')
 
 
 def load_users():
