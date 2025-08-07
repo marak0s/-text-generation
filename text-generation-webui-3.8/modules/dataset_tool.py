@@ -1,4 +1,5 @@
 from pathlib import Path
+import re
 
 try:  # pragma: no cover - pandas is an optional dependency at runtime
     import pandas as pd
@@ -50,10 +51,18 @@ def _preload_table(path: Path) -> None:
 
 
 def register_table(file_path: str | Path) -> str:
-    """Register a table path and return its name identifier."""
+    """Register a table path and return its name identifier.
+
+    Besides the exact file name, a secondary alias without leading digits
+    and separators is registered. This allows referencing files like
+    ``"1_2 - LeadTime.parquet"`` simply as ``"LeadTime.parquet"``.
+    """
     path = Path(file_path).resolve()
     name = path.name
     _loaded_tables[name] = str(path)
+    alias = re.sub(r'^[\s\-_\d]+', '', name)
+    if alias != name and alias not in _loaded_tables:
+        _loaded_tables[alias] = str(path)
     return name
 
 
@@ -203,12 +212,15 @@ def summarize_table(file_path: str, max_rows: int = 5, cell_limit: int = 80) -> 
             types = pdf.dtypes.astype(str).to_dict()
             pdf = _truncate_frame(pdf, cell_limit)
             columns = ', '.join(str(c) for c in pdf.columns)
+            parts.append(f"Лист: {sheet}")
             if row_count is not None:
-                parts.append(f"Лист: {sheet} ({row_count} строк)")
-            else:
-                parts.append(f"Лист: {sheet}")
+                parts.append(f"Строки: {row_count}")
             parts.append(f"Столбцы: {columns}")
             parts.append("Типы: " + ", ".join(f"{k}={v}" for k, v in types.items()))
+            if any(str(c).startswith('Unnamed') or str(c).isdigit() for c in pdf.columns):
+                parts.append(
+                    "Похоже, заголовки не распознаны. При чтении может потребоваться параметр header, чтобы пропустить лишние строки."
+                )
             parts.append(pdf.to_csv(index=False))
             if uniques:
                 parts.append(

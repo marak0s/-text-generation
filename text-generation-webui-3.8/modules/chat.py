@@ -409,7 +409,14 @@ def count_prompt_tokens(text_input, state):
         if files:
             row_idx = len(temp_history['internal'])
             for file_path in files:
-                add_message_attachment(temp_history, row_idx, file_path, is_user=True, chat_id=None)
+                add_message_attachment(
+                    temp_history,
+                    row_idx,
+                    file_path,
+                    is_user=True,
+                    chat_id=None,
+                    user=state.get('user', 'anonymous'),
+                )
 
         # Create temp state with modified history
         temp_state = copy.deepcopy(state)
@@ -503,8 +510,10 @@ def add_message_version(history, role, row_idx, is_current=True):
         history['metadata'][key]["current_version_index"] = len(history['metadata'][key]["versions"]) - 1
 
 
-def add_message_attachment(history, row_idx, file_path, is_user=True, chat_id=None):
-    """Add a file attachment to a message in history metadata"""
+def add_message_attachment(
+    history, row_idx, file_path, is_user=True, chat_id=None, user: str = 'anonymous'
+):
+    """Add a file attachment to a message in history metadata."""
     if 'metadata' not in history:
         history['metadata'] = {}
 
@@ -518,11 +527,6 @@ def add_message_attachment(history, row_idx, file_path, is_user=True, chat_id=No
     # Determine storage path
     path = Path(file_path)
     if chat_id is not None:
-        try:
-            from modules import login
-            user = login.current_user or 'anonymous'
-        except Exception:
-            user = 'anonymous'
         dest_dir = Path(f'user_data/sessions/{user}/files/{chat_id}')
         dest_dir.mkdir(parents=True, exist_ok=True)
         dest_path = dest_dir / path.name
@@ -721,7 +725,14 @@ def chatbot_wrapper(text, state, regenerate=False, _continue=False, loading_mess
 
         # Add attachments to metadata only, not modifying the message text
         for file_path in files:
-            add_message_attachment(output, row_idx, file_path, is_user=True, chat_id=state.get('unique_id'))
+            add_message_attachment(
+                output,
+                row_idx,
+                file_path,
+                is_user=True,
+                chat_id=state.get('unique_id'),
+                user=state.get('user', 'anonymous'),
+            )
 
         # Add web search results as attachments if enabled
         if state.get('enable_web_search', False):
@@ -833,23 +844,21 @@ def chatbot_wrapper(text, state, regenerate=False, _continue=False, loading_mess
             yield output
 
     final_text = output['internal'][-1][1]
-    code_blocks = re.findall(r"```python\n(.*?)```", final_text, re.DOTALL)
+    code_blocks = re.findall(r"```(?:python|py)\n(.*?)```", final_text, re.DOTALL | re.IGNORECASE)
     if code_blocks:
         try:
-            from modules import python_tool, login
-            user = getattr(login, 'current_user', 'anonymous')
+            from modules import python_tool
+            user = state.get('user', 'anonymous')
             img_dir = Path(f"user_data/sessions/{user}/files/{state.get('unique_id')}")
             for code in code_blocks:
                 res = python_tool.execute_python(code, out_dir=img_dir)
                 if res.get('stdout'):
                     final_text += f"\n```\n{res['stdout']}\n```"
                 for img in res.get('images', []):
-                    # Ссылаемся на сгенерированное изображение через эндпоинт
-                    # "/file". Для корректной загрузки слэши не должны быть
-                    # URL-кодированы, поэтому передаём safe="/".
                     try:
-                        rel = quote(Path(img).as_posix(), safe="/")
-                        final_text += f"\n![image](/file/{rel})"
+                        with open(img, 'rb') as f:
+                            b64 = base64.b64encode(f.read()).decode('utf-8')
+                        final_text += f"\n![image](data:image/png;base64,{b64})"
                     except Exception:
                         final_text += f"\n[Image saved to {img}]"
         except Exception as e:
@@ -943,10 +952,22 @@ def generate_chat_reply_wrapper(text, state, regenerate=False, _continue=False):
         current_time = time.monotonic()
         # Save on first iteration or if save_interval seconds have passed
         if i == 0 or (current_time - last_save_time) >= save_interval:
-            save_history(history, state['unique_id'], state['character_menu'], state['mode'])
+            save_history(
+                history,
+                state['unique_id'],
+                state['character_menu'],
+                state['mode'],
+                state.get('user', 'anonymous'),
+            )
             last_save_time = current_time
 
-    save_history(history, state['unique_id'], state['character_menu'], state['mode'])
+    save_history(
+        history,
+        state['unique_id'],
+        state['character_menu'],
+        state['mode'],
+        state.get('user', 'anonymous'),
+    )
 
 
 def remove_last_message(history):
@@ -1032,7 +1053,13 @@ def start_new_chat(state):
             update_message_metadata(history['metadata'], "assistant", 0, timestamp=get_current_timestamp())
 
     unique_id = datetime.now().strftime('%Y%m%d-%H-%M-%S')
-    save_history(history, unique_id, state['character_menu'], state['mode'])
+    save_history(
+        history,
+        unique_id,
+        state['character_menu'],
+        state['mode'],
+        state.get('user', 'anonymous'),
+    )
 
     return history
 
@@ -1040,8 +1067,7 @@ def start_new_chat(state):
 from modules import login
 
 
-def get_history_file_path(unique_id, character, mode):
-    user = login.current_user or 'anonymous'
+def get_history_file_path(unique_id, character, mode, user: str):
     if mode == 'instruct':
         p = Path(f'user_data/sessions/{user}/instruct/{unique_id}.json')
     else:
@@ -1050,8 +1076,8 @@ def get_history_file_path(unique_id, character, mode):
     return p
 
 
-def save_history(history, unique_id, character, mode):
-    p = get_history_file_path(unique_id, character, mode)
+def save_history(history, unique_id, character, mode, user: str):
+    p = get_history_file_path(unique_id, character, mode, user)
     if not p.parent.is_dir():
         p.parent.mkdir(parents=True)
 
@@ -1059,10 +1085,10 @@ def save_history(history, unique_id, character, mode):
         f.write(json.dumps(history, indent=4, ensure_ascii=False))
 
 
-def rename_history(old_id, new_id, character, mode):
+def rename_history(old_id, new_id, character, mode, user: str):
 
-    old_p = get_history_file_path(old_id, character, mode)
-    new_p = get_history_file_path(new_id, character, mode)
+    old_p = get_history_file_path(old_id, character, mode, user)
+    new_p = get_history_file_path(new_id, character, mode, user)
     if new_p.parent != old_p.parent:
         logger.error(f"The following path is not allowed: \"{new_p}\".")
     elif new_p == old_p:
@@ -1072,7 +1098,6 @@ def rename_history(old_id, new_id, character, mode):
     else:
         logger.info(f"Renaming \"{old_p}\" to \"{new_p}\"")
         old_p.rename(new_p)
-        user = login.current_user or 'anonymous'
         old_files = Path(f'user_data/sessions/{user}/files/{old_id}')
         new_files = Path(f'user_data/sessions/{user}/files/{new_id}')
         if old_files.exists():
@@ -1087,14 +1112,13 @@ def rename_history(old_id, new_id, character, mode):
 
 
 def get_paths(state):
+    user = state.get('user', 'anonymous')
     if state['mode'] == 'instruct':
-        user = login.current_user or 'anonymous'
         return Path(f'user_data/sessions/{user}/instruct').glob('*.json')
     else:
         character = state['character_menu']
 
         # Handle obsolete filenames and paths
-        user = login.current_user or 'anonymous'
         old_p = Path(f'user_data/sessions/{user}/chat/{character}_persistent.json')
         new_p = Path(f'user_data/sessions/{user}/chat/persistent_{character}.json')
         if old_p.exists():
@@ -1103,7 +1127,7 @@ def get_paths(state):
 
         if new_p.exists():
             unique_id = datetime.now().strftime('%Y%m%d-%H-%M-%S')
-            p = get_history_file_path(unique_id, character, state['mode'])
+            p = get_history_file_path(unique_id, character, state['mode'], user)
             logger.warning(f"Moving \"{new_p}\" to \"{p}\"")
             p.parent.mkdir(exist_ok=True)
             new_p.rename(p)
@@ -1171,7 +1195,7 @@ def load_latest_history(state):
 
     if len(histories) > 0:
         # Try to load the last visited chat for this character/mode
-        chat_state = load_last_chat_state()
+        chat_state = load_last_chat_state(state.get('user', 'anonymous'))
         key = get_chat_state_key(state['character_menu'], state['mode'])
         last_chat_id = chat_state.get("last_chats", {}).get(key)
 
@@ -1182,7 +1206,12 @@ def load_latest_history(state):
             # Fall back to most recent (current behavior)
             unique_id = histories[0]
 
-        history = load_history(unique_id, state['character_menu'], state['mode'])
+        history = load_history(
+            unique_id,
+            state['character_menu'],
+            state['mode'],
+            state.get('user', 'anonymous'),
+        )
         return history, unique_id
     else:
         return start_new_chat(state), None
@@ -1200,7 +1229,12 @@ def load_history_after_deletion(state, idx):
     idx = max(0, idx)
 
     if len(histories) > 0:
-        history = load_history(histories[idx][1], state['character_menu'], state['mode'])
+        history = load_history(
+            histories[idx][1],
+            state['character_menu'],
+            state['mode'],
+            state.get('user', 'anonymous'),
+        )
     else:
         history = start_new_chat(state)
         histories = find_all_histories_with_first_prompts(state)
@@ -1223,9 +1257,8 @@ def get_chat_state_key(character, mode):
         return f"chat_{character}"
 
 
-def load_last_chat_state():
+def load_last_chat_state(user: str):
     """Load the last chat state from file"""
-    user = login.current_user or 'anonymous'
     state_file = Path(f'user_data/sessions/{user}/chat_state.json')
     if state_file.exists():
         try:
@@ -1237,22 +1270,20 @@ def load_last_chat_state():
     return {"last_chats": {}}
 
 
-def save_last_chat_state(character, mode, unique_id):
+def save_last_chat_state(character, mode, unique_id, user: str):
     """Save the last visited chat for a character/mode"""
 
-    state = load_last_chat_state()
+    state = load_last_chat_state(user)
     key = get_chat_state_key(character, mode)
     state["last_chats"][key] = unique_id
-
-    user = login.current_user or 'anonymous'
     state_file = Path(f'user_data/sessions/{user}/chat_state.json')
     state_file.parent.mkdir(exist_ok=True)
     with open(state_file, 'w', encoding='utf-8') as f:
         f.write(json.dumps(state, indent=2))
 
 
-def load_history(unique_id, character, mode):
-    p = get_history_file_path(unique_id, character, mode)
+def load_history(unique_id, character, mode, user: str):
+    p = get_history_file_path(unique_id, character, mode, user)
 
     f = json.loads(open(p, 'rb').read())
     if 'internal' in f and 'visible' in f:
@@ -1303,14 +1334,9 @@ def load_history_json(file, history):
         return history
 
 
-def delete_history(unique_id, character, mode):
-    p = get_history_file_path(unique_id, character, mode)
+def delete_history(unique_id, character, mode, user: str):
+    p = get_history_file_path(unique_id, character, mode, user)
     delete_file(p)
-    try:
-        from modules import login
-        user = login.current_user or 'anonymous'
-    except Exception:
-        user = 'anonymous'
     attachments_dir = Path(f'user_data/sessions/{user}/files/{unique_id}')
     if attachments_dir.exists():
         try:
@@ -1673,7 +1699,13 @@ def my_yaml_output(data):
 
 def handle_send_dummy_message_click(text, state):
     history = send_dummy_message(text, state)
-    save_history(history, state['unique_id'], state['character_menu'], state['mode'])
+    save_history(
+        history,
+        state['unique_id'],
+        state['character_menu'],
+        state['mode'],
+        state.get('user', 'anonymous'),
+    )
     html = redraw_html(history, state['name1'], state['name2'], state['mode'], state['chat_style'], state['character_menu'])
 
     return [history, html, {"text": "", "files": []}]
@@ -1681,7 +1713,13 @@ def handle_send_dummy_message_click(text, state):
 
 def handle_send_dummy_reply_click(text, state):
     history = send_dummy_reply(text, state)
-    save_history(history, state['unique_id'], state['character_menu'], state['mode'])
+    save_history(
+        history,
+        state['unique_id'],
+        state['character_menu'],
+        state['mode'],
+        state.get('user', 'anonymous'),
+    )
     html = redraw_html(history, state['name1'], state['name2'], state['mode'], state['chat_style'], state['character_menu'])
 
     return [history, html, {"text": "", "files": []}]
@@ -1689,18 +1727,41 @@ def handle_send_dummy_reply_click(text, state):
 
 def handle_remove_last_click(state):
     last_input, history = remove_last_message(state['history'])
-    save_history(history, state['unique_id'], state['character_menu'], state['mode'])
+    save_history(
+        history,
+        state['unique_id'],
+        state['character_menu'],
+        state['mode'],
+        state.get('user', 'anonymous'),
+    )
     html = redraw_html(history, state['name1'], state['name2'], state['mode'], state['chat_style'], state['character_menu'])
 
     return [history, html, {"text": last_input, "files": []}]
 
 
 def handle_unique_id_select(state):
-    history = load_history(state['unique_id'], state['character_menu'], state['mode'])
-    html = redraw_html(history, state['name1'], state['name2'], state['mode'], state['chat_style'], state['character_menu'])
+    history = load_history(
+        state['unique_id'],
+        state['character_menu'],
+        state['mode'],
+        state.get('user', 'anonymous'),
+    )
+    html = redraw_html(
+        history,
+        state['name1'],
+        state['name2'],
+        state['mode'],
+        state['chat_style'],
+        state['character_menu'],
+    )
 
     # Save this as the last visited chat
-    save_last_chat_state(state['character_menu'], state['mode'], state['unique_id'])
+    save_last_chat_state(
+        state['character_menu'],
+        state['mode'],
+        state['unique_id'],
+        state.get('user', 'anonymous'),
+    )
 
     convert_to_markdown.cache_clear()
 
@@ -1727,7 +1788,12 @@ def handle_delete_chat_confirm_click(state):
     filtered_ids = [h[1] for h in filtered_histories]
     index = str(filtered_ids.index(state['unique_id']))
 
-    delete_history(state['unique_id'], state['character_menu'], state['mode'])
+    delete_history(
+        state['unique_id'],
+        state['character_menu'],
+        state['mode'],
+        state.get('user', 'anonymous'),
+    )
     history, unique_id = load_history_after_deletion(state, index)
     html = redraw_html(history, state['name1'], state['name2'], state['mode'], state['chat_style'], state['character_menu'])
 
@@ -1751,7 +1817,13 @@ def handle_branch_chat_click(state):
         history['visible'] = history['visible'][:branch_from_index + 1]
         history['internal'] = history['internal'][:branch_from_index + 1]
     new_unique_id = datetime.now().strftime('%Y%m%d-%H-%M-%S')
-    save_history(history, new_unique_id, state['character_menu'], state['mode'])
+    save_history(
+        history,
+        new_unique_id,
+        state['character_menu'],
+        state['mode'],
+        state.get('user', 'anonymous'),
+    )
 
     histories = find_all_histories_with_first_prompts(state)
     html = redraw_html(history, state['name1'], state['name2'], state['mode'], state['chat_style'], state['character_menu'])
@@ -1799,7 +1871,13 @@ def handle_edit_message_click(state):
 
     add_message_version(history, role, message_index, is_current=True)
 
-    save_history(history, state['unique_id'], state['character_menu'], state['mode'])
+    save_history(
+        history,
+        state['unique_id'],
+        state['character_menu'],
+        state['mode'],
+        state.get('user', 'anonymous'),
+    )
     html_output = redraw_html(history, state['name1'], state['name2'], state['mode'], state['chat_style'], state['character_menu'])
 
     return [history, html_output]
@@ -1843,8 +1921,21 @@ def handle_navigate_version_click(state):
     update_message_metadata(history['metadata'], role, message_index, timestamp=version_to_load['timestamp'])
 
     # Redraw and save
-    html = redraw_html(history, state['name1'], state['name2'], state['mode'], state['chat_style'], state['character_menu'])
-    save_history(history, state['unique_id'], state['character_menu'], state['mode'])
+    html = redraw_html(
+        history,
+        state['name1'],
+        state['name2'],
+        state['mode'],
+        state['chat_style'],
+        state['character_menu'],
+    )
+    save_history(
+        history,
+        state['unique_id'],
+        state['character_menu'],
+        state['mode'],
+        state.get('user', 'anonymous'),
+    )
 
     return [history, html]
 
@@ -1857,7 +1948,13 @@ def handle_rename_chat_click():
 
 
 def handle_rename_chat_confirm(rename_to, state):
-    rename_history(state['unique_id'], rename_to, state['character_menu'], state['mode'])
+    rename_history(
+        state['unique_id'],
+        rename_to,
+        state['character_menu'],
+        state['mode'],
+        state.get('user', 'anonymous'),
+    )
     histories = find_all_histories_with_first_prompts(state)
 
     return [
@@ -1874,7 +1971,13 @@ def handle_search_chat_change(state):
 def handle_upload_chat_history(load_chat_history, state):
     history = start_new_chat(state)
     history = load_history_json(load_chat_history, history)
-    save_history(history, state['unique_id'], state['character_menu'], state['mode'])
+    save_history(
+        history,
+        state['unique_id'],
+        state['character_menu'],
+        state['mode'],
+        state.get('user', 'anonymous'),
+    )
     histories = find_all_histories_with_first_prompts(state)
 
     html = redraw_html(history, state['name1'], state['name2'], state['mode'], state['chat_style'], state['character_menu'])

@@ -6,12 +6,55 @@ import gradio as gr
 from modules import shared, ui
 
 _users = {}
-current_user = None
+# Map Gradio session hashes to logged-in usernames so multiple users can
+# interact with the server without clobbering each other's state. When
+# available, session information is also persisted in Apache Ignite so
+# that logins survive application restarts and do not leak between users.
+_session_users: dict[str, str] = {}
+
+try:  # pragma: no cover - optional dependency and runtime service
+    from pyignite import Client
+
+    _ignite_client = Client()
+    _ignite_client.connect("127.0.0.1", 10800)
+    _session_cache = _ignite_client.get_or_create_cache("session_cache")
+except Exception:  # pragma: no cover - fallback to in-process sessions
+    _ignite_client = None
+    _session_cache = None
 
 
-def get_user_settings_path(user: str | None = None) -> Path:
-    """Return the settings.yaml path for the given user."""
-    user = user or current_user or 'anonymous'
+def get_session_user(request: gr.Request | None = None) -> str:
+    """Return the username associated with the current Gradio session."""
+    if request is not None:
+        user = load_session_data(request.session_hash)
+        return user or "anonymous"
+    return "anonymous"
+
+def save_session_data(session_id: str, data: str) -> None:
+    """Persist ``data`` for ``session_id`` in Ignite or fallback store."""
+    if _session_cache is not None:
+        try:
+            _session_cache.put(session_id, data)
+            return
+        except Exception:
+            pass
+    _session_users[session_id] = data
+
+def load_session_data(session_id: str) -> str | None:
+    """Load data previously stored for ``session_id``."""
+    if _session_cache is not None:
+        try:
+            return _session_cache.get(session_id)
+        except Exception:
+            return None
+    return _session_users.get(session_id)
+
+
+def get_user_settings_path(
+    user: str | None = None, request: gr.Request | None = None
+) -> Path:
+    """Return the settings.yaml path for the given user or session."""
+    user = user or get_session_user(request)
     return Path(f'user_data/sessions/{user}/settings.yaml')
 
 
@@ -53,16 +96,36 @@ def create_login_ui(login_block, interface_block):
         password = gr.Textbox(label='Password', type='password')
         login_btn = gr.Button('Login')
         msg = gr.HTML()
+        success = gr.State(False)
 
-        def do_login(u, p):
-            global current_user
+        def do_login(u, p, request: gr.Request):
             if verify_user(u, p):
-                current_user = u
+                save_session_data(request.session_hash, u)
                 load_user_settings(u)
-                return gr.update(visible=False), gr.update(visible=True), ''
-            return gr.update(), gr.update(), '<span style="color:red">Invalid credentials</span>'
+                return (
+                    gr.update(visible=False),
+                    gr.update(visible=True),
+                    '',
+                    True,
+                )
+            return (
+                gr.update(),
+                gr.update(),
+                '<span style="color:red">Invalid credentials</span>',
+                False,
+            )
 
-        (login_btn.click(do_login, [username, password], [login_block, interface_block, msg])
-                  .then(None, None, None, js='() => {window.dispatchEvent(new Event("resize"));}'))
+        (
+            login_btn.click(
+                do_login,
+                [username, password],
+                [login_block, interface_block, msg, success],
+            ).then(
+                None,
+                success,
+                None,
+                js='(s) => {window.dispatchEvent(new Event("resize")); if (s) window.location.reload();}',
+            )
+        )
     return
 
