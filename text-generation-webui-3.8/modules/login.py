@@ -107,7 +107,7 @@ def create_login_ui(login_block, interface_block):
         login_btn = gr.Button('Login')
         msg = gr.HTML()
         success = gr.State(False)
-        cookie = gr.State()
+        username_state = gr.State()
 
         def do_login(u, p, request: gr.Request):
             if verify_user(u, p):
@@ -118,26 +118,29 @@ def create_login_ui(login_block, interface_block):
                     gr.update(visible=True),
                     '',
                     True,
-                    gr.set_cookie('user', u),
+                    u,
                 )
             return (
                 gr.update(),
                 gr.update(),
                 '<span style="color:red">Invalid credentials</span>',
                 False,
-                None,
+                '',
             )
 
         (
             login_btn.click(
                 do_login,
                 [username, password],
-                [login_block, interface_block, msg, success, cookie],
+                [login_block, interface_block, msg, success, username_state],
             ).then(
                 None,
-                success,
+                [success, username_state],
                 None,
-                js='(s) => {window.dispatchEvent(new Event("resize")); if (s) window.location.reload();}',
+                js='(s, u) => {\
+window.dispatchEvent(new Event("resize"));\
+if (s) {document.cookie = `user=${u}; path=/`; window.location.reload();}\
+}',
             )
         )
     return
