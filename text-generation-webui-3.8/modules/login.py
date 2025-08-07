@@ -112,8 +112,8 @@ def restore_login(request: gr.Request):
     if user != "anonymous":
         save_session_data(request.session_hash, user)
         load_user_settings(user)
-        return gr.update(visible=False), gr.update(visible=True)
-    return gr.update(), gr.update()
+        return gr.update(visible=False), gr.update(visible=True), user
+    return gr.update(), gr.update(), "anonymous"
 
 
 def create_login_ui(login_block, interface_block):
@@ -123,7 +123,8 @@ def create_login_ui(login_block, interface_block):
         login_btn = gr.Button('Login')
         msg = gr.HTML()
         success = gr.State(False)
-        username_state = gr.State()
+        username_state = gr.State("anonymous")
+        shared.gradio['user'] = username_state
 
         def do_login(u, p, request: gr.Request):
             if verify_user(u, p):

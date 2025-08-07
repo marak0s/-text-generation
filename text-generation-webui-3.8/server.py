@@ -137,11 +137,11 @@ def create_interface():
 
         # Restore previously authenticated sessions using the browser cookie
         shared.gradio['interface'].load(
-            login.restore_login,
-            None,
-            [login_block, interface_block],
-            show_progress=False,
-        )
+        login.restore_login,
+        None,
+        [login_block, interface_block, shared.gradio['user']],
+        show_progress=False,
+    )
 
         with interface_block:
             # Interface state
