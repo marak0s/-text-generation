@@ -41,20 +41,16 @@ def execute_python(code: str, out_dir: str | Path | None = None):
             "load_table": dataset_tool.load_table,
         },
     )
-    # Patch pandas readers to resolve registered table aliases automatically
+    # Patch pandas readers to forbid direct file access
     if not env.get("_path_patched"):
-        def _resolve(path):
-            return dataset_tool.get_table_path(str(path)) or path
-
-        def _wrap(reader):
-            def inner(path, *a, **kw):
-                return reader(_resolve(path), *a, **kw)
+        def _block(name):
+            def inner(*a, **kw):
+                raise RuntimeError(f"Запрещено использовать pd.{name}; данные обязательно получайте только через load_table()")
             return inner
 
         for name in ("read_csv", "read_parquet", "read_excel"):
-            reader = getattr(env["pd"], name, None)
-            if reader:
-                setattr(env["pd"], name, _wrap(reader))
+            if hasattr(env["pd"], name):
+                setattr(env["pd"], name, _block(name))
         env["_path_patched"] = True
     try:
         with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stdout):

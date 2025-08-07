@@ -189,7 +189,7 @@ def summarize_table(file_path: str, max_rows: int = 5, cell_limit: int = 80) -> 
                 "Уникальные значения: " + ", ".join(f"{k}={v}" for k, v in uniques.items())
             )
         parts.append(
-            f"Используйте load_table('{path.name}') для загрузки полной таблицы (или get_table_path('{path.name}') для пути). "
+            f"Только load_table('{path.name}') разрешено для загрузки полной таблицы (get_table_path('{path.name}') — только для пути). "
             f"Предпросмотр ограничен {max_rows} строками и {cell_limit} символами в ячейке, поэтому не делайте по нему выводов. "
             "Всегда проверяйте df.dtypes и при необходимости преобразуйте столбцы (например, pd.to_datetime) перед фильтрацией. "
             "Заключайте анализ в блоки ```python```."
@@ -244,9 +244,10 @@ def summarize_table(file_path: str, max_rows: int = 5, cell_limit: int = 80) -> 
                     "Уникальные значения: " + ", ".join(f"{k}={v}" for k, v in uniques.items())
                 )
         parts.append(
-            f"Используйте load_table('{path.name}', sheet_name='ИмяЛиста') для загрузки полной таблицы (или get_table_path('{path.name}') для пути). "
+            f"Только load_table('{path.name}', sheet_name='ИмяЛиста') разрешено для загрузки полной таблицы (get_table_path('{path.name}') — только для пути). "
             f"Предпросмотр ограничен {max_rows} строками и {cell_limit} символами в ячейке, поэтому не делайте по нему выводов. "
             "Всегда проверяйте df.dtypes и при необходимости преобразуйте столбцы (например, pd.to_datetime) перед фильтрацией. "
+            "При наличии нескольких листов обязательно указывайте sheet_name."
             "Заключайте анализ в блоки ```python```."
         )
         _preload_table(path)
@@ -301,7 +302,7 @@ def summarize_table(file_path: str, max_rows: int = 5, cell_limit: int = 80) -> 
                     "Уникальные значения: " + ", ".join(f"{k}={v}" for k, v in uniques.items())
                 )
             parts.append(
-                f"Используйте load_table('{path.name}') для загрузки полной таблицы (или get_table_path('{path.name}') для пути). "
+                f"Только load_table('{path.name}') разрешено для загрузки полной таблицы (get_table_path('{path.name}') — только для пути). "
                 f"Предпросмотр ограничен {max_rows} строками и {cell_limit} символами в ячейке, поэтому не делайте по нему выводов. "
                 "Всегда проверяйте df.dtypes и при необходимости преобразуйте столбцы (например, pd.to_datetime) перед фильтрацией. "
                 "Заключайте анализ в блоки ```python```."
@@ -324,9 +325,12 @@ def answer_question_with_pandas(question: str, file_path: str | Path) -> str:
         f"Предпросмотр таблицы `{table_name}`:\n{summary}\n\n"
         f"Вопрос: {question}\n"
         "Ответ должен опираться на полный набор данных, а не на предпросмотр. "
-        f"Получите DataFrame через load_table('{table_name}', sheet_name='ИмяЛиста' при необходимости) (не используйте pd.read_* по пути файла). "
-        "Перед фильтрацией проверьте df.dtypes и при необходимости преобразуйте столбцы, например pd.to_datetime. "
-        "Сохраните ответ в переменную `result` и отвечайте на том же языке, что и вопрос."
+        f"Данные обязательно получай только через load_table('{table_name}', sheet_name='ИмяЛиста' при необходимости). "
+        "Если в файле несколько листов, обязательно укажи sheet_name. "
+        "Запрещено использовать pd.read_* по пути файла. "
+        "Перед фильтрацией обязательно проверь df.dtypes и при необходимости преобразуй столбцы, например pd.to_datetime. "
+        "Обязательно сохрани итог в переменную `result` и выведи его через print(result). "
+        "Отвечай на том же языке, что и вопрос."
     )
     return prompt
 
@@ -354,7 +358,7 @@ def execute_pandas_code(
     register_table(path)
 
     if 'pd.read_' in code:
-        return 'Используйте load_table() вместо pd.read_* для чтения данных'
+        return 'Запрещено использовать pd.read_*; данные загружайте только через load_table()'
 
     local_vars = {}
     try:
@@ -371,7 +375,7 @@ def execute_pandas_code(
                 )
                 return f"{head}\n... ({len(result) - max_output_rows} more rows)"
             return _truncate_frame(result, cell_limit).to_csv(index=False)
-        return str(result) if result is not None else 'Нет результата'
+        return str(result) if result is not None else 'Нет результата; обязательно сохраните ответ в переменную result и выведите print(result)'
     except Exception as e:
         return f'Ошибка выполнения кода: {e}'
 
