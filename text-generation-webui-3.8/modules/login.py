@@ -33,6 +33,12 @@ def get_session_user(request: gr.Request | None = None) -> str:
                 cookie_user = request.cookies.get("user")
                 if cookie_user:
                     return cookie_user
+            # Fallback for environments where ``request.cookies`` is empty
+            cookie_header = request.headers.get("cookie", "")
+            for part in cookie_header.split(";"):
+                name, _, value = part.strip().partition("=")
+                if name == "user" and value:
+                    return value
         except Exception:
             # Fall back to the in-memory/session based mapping
             pass
@@ -98,6 +104,16 @@ def load_users():
 def verify_user(username: str, password: str) -> bool:
     users = load_users()
     return users.get(username) == password
+
+
+def restore_login(request: gr.Request):
+    """Restore interface visibility based on the ``user`` cookie."""
+    user = get_session_user(request)
+    if user != "anonymous":
+        save_session_data(request.session_hash, user)
+        load_user_settings(user)
+        return gr.update(visible=False), gr.update(visible=True)
+    return gr.update(), gr.update()
 
 
 def create_login_ui(login_block, interface_block):
