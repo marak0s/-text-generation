@@ -17,6 +17,15 @@ _loaded_tables: dict[str, str] = {}
 _table_cache: dict[str, "pd.DataFrame"] = {}
 
 
+def _mark_df(df: "pd.DataFrame") -> "pd.DataFrame":
+    """Mark DataFrames produced by load_table so wrappers can detect them."""
+    try:
+        setattr(df, "_loaded_via_load_table", True)
+    except Exception:
+        pass
+    return df
+
+
 def _preload_table(path: Path) -> None:
     """Load the entire table into cache so pandas queries use full data."""
     name = path.name
@@ -26,26 +35,26 @@ def _preload_table(path: Path) -> None:
         suffix = path.suffix.lower()
         if suffix == '.csv':
             if pl:
-                _table_cache[name] = pl.read_csv(path).to_pandas()
+                _table_cache[name] = _mark_df(pl.read_csv(path).to_pandas())
             else:
-                _table_cache[name] = pd.read_csv(path, low_memory=False)
+                _table_cache[name] = _mark_df(pd.read_csv(path, low_memory=False))
         elif suffix in {'.xls', '.xlsx'}:
             xls = pd.ExcelFile(path)
             sheets = {}
             for sheet in xls.sheet_names:
                 if pl:
                     try:
-                        sheets[sheet] = pl.read_excel(path, sheet_name=sheet).to_pandas()
+                        sheets[sheet] = _mark_df(pl.read_excel(path, sheet_name=sheet).to_pandas())
                     except Exception:
-                        sheets[sheet] = xls.parse(sheet)
+                        sheets[sheet] = _mark_df(xls.parse(sheet))
                 else:
-                    sheets[sheet] = xls.parse(sheet)
+                    sheets[sheet] = _mark_df(xls.parse(sheet))
             _table_cache[name] = sheets
         elif suffix == '.parquet':
             if pl:
-                _table_cache[name] = pl.read_parquet(path).to_pandas()
+                _table_cache[name] = _mark_df(pl.read_parquet(path).to_pandas())
             else:
-                _table_cache[name] = pd.read_parquet(path)
+                _table_cache[name] = _mark_df(pd.read_parquet(path))
     except Exception:
         pass
 
@@ -92,17 +101,17 @@ def load_table(name: str, sheet_name: str | None = None):
         if isinstance(data, dict):
             if sheet_name:
                 try:
-                    return data[sheet_name]
+                    return _mark_df(data[sheet_name])
                 except KeyError:
                     raise FileNotFoundError(
                         f"Лист '{sheet_name}' не найден в {name}"
                     )
             if len(data) == 1:
-                return next(iter(data.values()))
+                return _mark_df(next(iter(data.values())))
             raise ValueError(
                 f"В {name} несколько листов. Укажите sheet_name."
             )
-        return data
+        return _mark_df(data)
     raise FileNotFoundError(f"Не удалось загрузить таблицу: {name}")
 
 
@@ -189,7 +198,8 @@ def summarize_table(file_path: str, max_rows: int = 5, cell_limit: int = 80) -> 
                 "Уникальные значения: " + ", ".join(f"{k}={v}" for k, v in uniques.items())
             )
         parts.append(
-            f"Только load_table('{path.name}') разрешено для загрузки полной таблицы (get_table_path('{path.name}') — только для пути). "
+            f"Полную таблицу загружайте только через load_table('{path.name}') "
+            f"или pd.read_* по пути get_table_path('{path.name}'); запрещено комбинировать эти методы. "
             f"Предпросмотр ограничен {max_rows} строками и {cell_limit} символами в ячейке, поэтому не делайте по нему выводов. "
             "Всегда проверяйте df.dtypes и при необходимости преобразуйте столбцы (например, pd.to_datetime) перед фильтрацией. "
             "Заключайте анализ в блоки ```python```."
@@ -244,7 +254,8 @@ def summarize_table(file_path: str, max_rows: int = 5, cell_limit: int = 80) -> 
                     "Уникальные значения: " + ", ".join(f"{k}={v}" for k, v in uniques.items())
                 )
         parts.append(
-            f"Только load_table('{path.name}', sheet_name='ИмяЛиста') разрешено для загрузки полной таблицы (get_table_path('{path.name}') — только для пути). "
+            f"Полную таблицу загружайте только через load_table('{path.name}', sheet_name='ИмяЛиста') "
+            f"или pd.read_* по пути get_table_path('{path.name}'); запрещено комбинировать эти методы. "
             f"Предпросмотр ограничен {max_rows} строками и {cell_limit} символами в ячейке, поэтому не делайте по нему выводов. "
             "Всегда проверяйте df.dtypes и при необходимости преобразуйте столбцы (например, pd.to_datetime) перед фильтрацией. "
             "При наличии нескольких листов обязательно указывайте sheet_name."
@@ -302,7 +313,8 @@ def summarize_table(file_path: str, max_rows: int = 5, cell_limit: int = 80) -> 
                     "Уникальные значения: " + ", ".join(f"{k}={v}" for k, v in uniques.items())
                 )
             parts.append(
-                f"Только load_table('{path.name}') разрешено для загрузки полной таблицы (get_table_path('{path.name}') — только для пути). "
+                f"Полную таблицу загружайте только через load_table('{path.name}') "
+                f"или pd.read_* по пути get_table_path('{path.name}'); запрещено комбинировать эти методы. "
                 f"Предпросмотр ограничен {max_rows} строками и {cell_limit} символами в ячейке, поэтому не делайте по нему выводов. "
                 "Всегда проверяйте df.dtypes и при необходимости преобразуйте столбцы (например, pd.to_datetime) перед фильтрацией. "
                 "Заключайте анализ в блоки ```python```."
@@ -325,9 +337,9 @@ def answer_question_with_pandas(question: str, file_path: str | Path) -> str:
         f"Предпросмотр таблицы `{table_name}`:\n{summary}\n\n"
         f"Вопрос: {question}\n"
         "Ответ должен опираться на полный набор данных, а не на предпросмотр. "
-        f"Данные обязательно получай только через load_table('{table_name}', sheet_name='ИмяЛиста' при необходимости). "
+        f"Данные загружай через load_table('{table_name}', sheet_name='ИмяЛиста' при необходимости) "
+        f"или pd.read_* по пути get_table_path('{table_name}'); запрещено комбинировать эти методы. "
         "Если в файле несколько листов, обязательно укажи sheet_name. "
-        "Запрещено использовать pd.read_* по пути файла. "
         "Перед фильтрацией обязательно проверь df.dtypes и при необходимости преобразуй столбцы, например pd.to_datetime. "
         "Обязательно сохрани итог в переменную `result` и выведи его через print(result). "
         "Отвечай на том же языке, что и вопрос."
@@ -357,8 +369,8 @@ def execute_pandas_code(
     # Register the table so ``load_table`` can resolve it by name
     register_table(path)
 
-    if 'pd.read_' in code:
-        return 'Запрещено использовать pd.read_*; данные загружайте только через load_table()'
+    if 'pd.read_' in code and 'load_table' in code:
+        return 'Запрещено одновременно использовать load_table и pd.read_*; выберите один способ загрузки таблицы'
 
     local_vars = {}
     try:

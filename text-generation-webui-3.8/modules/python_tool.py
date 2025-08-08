@@ -41,16 +41,21 @@ def execute_python(code: str, out_dir: str | Path | None = None):
             "load_table": dataset_tool.load_table,
         },
     )
-    # Patch pandas readers to forbid direct file access
+    # Patch pandas readers to warn when mixing with load_table
     if not env.get("_path_patched"):
-        def _block(name):
+        def _wrap(reader, name):
             def inner(*a, **kw):
-                raise RuntimeError(f"Запрещено использовать pd.{name}; данные обязательно получайте только через load_table()")
+                if a and getattr(a[0], "_loaded_via_load_table", False):
+                    raise RuntimeError(
+                        f"Запрещено использовать pd.{name} на результате load_table; выберите один способ загрузки данных"
+                    )
+                return reader(*a, **kw)
             return inner
 
         for name in ("read_csv", "read_parquet", "read_excel"):
-            if hasattr(env["pd"], name):
-                setattr(env["pd"], name, _block(name))
+            reader = getattr(env["pd"], name, None)
+            if reader:
+                setattr(env["pd"], name, _wrap(reader, name))
         env["_path_patched"] = True
     try:
         with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stdout):
