@@ -17,6 +17,15 @@ _loaded_tables: dict[str, str] = {}
 _table_cache: dict[str, "pd.DataFrame"] = {}
 
 
+def _mark_df(df: "pd.DataFrame") -> "pd.DataFrame":
+    """Mark DataFrames produced by load_table so wrappers can detect them."""
+    try:
+        setattr(df, "_loaded_via_load_table", True)
+    except Exception:
+        pass
+    return df
+
+
 def _preload_table(path: Path) -> None:
     """Load the entire table into cache so pandas queries use full data."""
     name = path.name
@@ -26,26 +35,26 @@ def _preload_table(path: Path) -> None:
         suffix = path.suffix.lower()
         if suffix == '.csv':
             if pl:
-                _table_cache[name] = pl.read_csv(path).to_pandas()
+                _table_cache[name] = _mark_df(pl.read_csv(path).to_pandas())
             else:
-                _table_cache[name] = pd.read_csv(path, low_memory=False)
+                _table_cache[name] = _mark_df(pd.read_csv(path, low_memory=False))
         elif suffix in {'.xls', '.xlsx'}:
             xls = pd.ExcelFile(path)
             sheets = {}
             for sheet in xls.sheet_names:
                 if pl:
                     try:
-                        sheets[sheet] = pl.read_excel(path, sheet_name=sheet).to_pandas()
+                        sheets[sheet] = _mark_df(pl.read_excel(path, sheet_name=sheet).to_pandas())
                     except Exception:
-                        sheets[sheet] = xls.parse(sheet)
+                        sheets[sheet] = _mark_df(xls.parse(sheet))
                 else:
-                    sheets[sheet] = xls.parse(sheet)
+                    sheets[sheet] = _mark_df(xls.parse(sheet))
             _table_cache[name] = sheets
         elif suffix == '.parquet':
             if pl:
-                _table_cache[name] = pl.read_parquet(path).to_pandas()
+                _table_cache[name] = _mark_df(pl.read_parquet(path).to_pandas())
             else:
-                _table_cache[name] = pd.read_parquet(path)
+                _table_cache[name] = _mark_df(pd.read_parquet(path))
     except Exception:
         pass
 
@@ -71,10 +80,13 @@ def get_table_path(name: str) -> str | None:
     return _loaded_tables.get(name)
 
 
-def load_table(name: str):
+def load_table(name: str, sheet_name: str | None = None):
     """Return a cached table by name, loading it from disk if necessary.
 
-    For Excel files, returns a dict mapping sheet names to DataFrames.
+    For Excel files, returns a single sheet :class:`pandas.DataFrame`. If the
+    workbook contains multiple sheets, ``sheet_name`` must be provided to
+    select one; otherwise an informative error is raised.
+
     Raises FileNotFoundError if the table name is unknown or cannot be
     loaded.
     """
@@ -85,7 +97,21 @@ def load_table(name: str):
     if name not in _table_cache:
         _preload_table(path)
     if name in _table_cache:
-        return _table_cache[name]
+        data = _table_cache[name]
+        if isinstance(data, dict):
+            if sheet_name:
+                try:
+                    return _mark_df(data[sheet_name])
+                except KeyError:
+                    raise FileNotFoundError(
+                        f"Лист '{sheet_name}' не найден в {name}"
+                    )
+            if len(data) == 1:
+                return _mark_df(next(iter(data.values())))
+            raise ValueError(
+                f"В {name} несколько листов. Укажите sheet_name."
+            )
+        return _mark_df(data)
     raise FileNotFoundError(f"Не удалось загрузить таблицу: {name}")
 
 
@@ -172,7 +198,8 @@ def summarize_table(file_path: str, max_rows: int = 5, cell_limit: int = 80) -> 
                 "Уникальные значения: " + ", ".join(f"{k}={v}" for k, v in uniques.items())
             )
         parts.append(
-            f"Используйте load_table('{path.name}') для загрузки полной таблицы (или get_table_path('{path.name}') для пути). "
+            f"Полную таблицу загружайте только через load_table('{path.name}') "
+            f"или pd.read_* по пути get_table_path('{path.name}'); запрещено комбинировать эти методы. "
             f"Предпросмотр ограничен {max_rows} строками и {cell_limit} символами в ячейке, поэтому не делайте по нему выводов. "
             "Всегда проверяйте df.dtypes и при необходимости преобразуйте столбцы (например, pd.to_datetime) перед фильтрацией. "
             "Заключайте анализ в блоки ```python```."
@@ -227,9 +254,11 @@ def summarize_table(file_path: str, max_rows: int = 5, cell_limit: int = 80) -> 
                     "Уникальные значения: " + ", ".join(f"{k}={v}" for k, v in uniques.items())
                 )
         parts.append(
-            f"Используйте load_table('{path.name}') для загрузки полной таблицы (или get_table_path('{path.name}') для пути). "
+            f"Полную таблицу загружайте только через load_table('{path.name}', sheet_name='ИмяЛиста') "
+            f"или pd.read_* по пути get_table_path('{path.name}'); запрещено комбинировать эти методы. "
             f"Предпросмотр ограничен {max_rows} строками и {cell_limit} символами в ячейке, поэтому не делайте по нему выводов. "
             "Всегда проверяйте df.dtypes и при необходимости преобразуйте столбцы (например, pd.to_datetime) перед фильтрацией. "
+            "При наличии нескольких листов обязательно указывайте sheet_name."
             "Заключайте анализ в блоки ```python```."
         )
         _preload_table(path)
@@ -284,7 +313,8 @@ def summarize_table(file_path: str, max_rows: int = 5, cell_limit: int = 80) -> 
                     "Уникальные значения: " + ", ".join(f"{k}={v}" for k, v in uniques.items())
                 )
             parts.append(
-                f"Используйте load_table('{path.name}') для загрузки полной таблицы (или get_table_path('{path.name}') для пути). "
+                f"Полную таблицу загружайте только через load_table('{path.name}') "
+                f"или pd.read_* по пути get_table_path('{path.name}'); запрещено комбинировать эти методы. "
                 f"Предпросмотр ограничен {max_rows} строками и {cell_limit} символами в ячейке, поэтому не делайте по нему выводов. "
                 "Всегда проверяйте df.dtypes и при необходимости преобразуйте столбцы (например, pd.to_datetime) перед фильтрацией. "
                 "Заключайте анализ в блоки ```python```."
@@ -307,9 +337,12 @@ def answer_question_with_pandas(question: str, file_path: str | Path) -> str:
         f"Предпросмотр таблицы `{table_name}`:\n{summary}\n\n"
         f"Вопрос: {question}\n"
         "Ответ должен опираться на полный набор данных, а не на предпросмотр. "
-        f"Получите DataFrame через load_table('{table_name}') (не используйте pd.read_* по пути файла). "
-        "Перед фильтрацией проверьте df.dtypes и при необходимости преобразуйте столбцы, например pd.to_datetime. "
-        "Сохраните ответ в переменную `result` и отвечайте на том же языке, что и вопрос."
+        f"Данные загружай через load_table('{table_name}', sheet_name='ИмяЛиста' при необходимости) "
+        f"или pd.read_* по пути get_table_path('{table_name}'); запрещено комбинировать эти методы. "
+        "Если в файле несколько листов, обязательно укажи sheet_name. "
+        "Перед фильтрацией обязательно проверь df.dtypes и при необходимости преобразуй столбцы, например pd.to_datetime. "
+        "Обязательно сохрани итог в переменную `result` и выведи его через print(result). "
+        "Отвечай на том же языке, что и вопрос."
     )
     return prompt
 
@@ -332,60 +365,20 @@ def execute_pandas_code(
             path = Path(alt)
         else:
             return f'Файл не найден: {path}'
-    suffix = path.suffix.lower()
+
+    # Register the table so ``load_table`` can resolve it by name
+    register_table(path)
+
+    if 'pd.read_' in code and 'load_table' in code:
+        return 'Запрещено одновременно использовать load_table и pd.read_*; выберите один способ загрузки таблицы'
+
     local_vars = {}
-    name = path.name
-
     try:
-        if suffix == '.csv':
-            if name in _table_cache:
-                local_vars['df'] = _table_cache[name]
-            else:
-                if pl:
-                    try:
-                        df = pl.scan_csv(path).collect().to_pandas()
-                    except Exception:
-                        df = pd.read_csv(path, low_memory=False)
-                else:
-                    df = pd.read_csv(path, low_memory=False)
-                _table_cache[name] = df
-                local_vars['df'] = df
-        elif suffix in {'.xls', '.xlsx'}:
-            if name in _table_cache:
-                sheets = _table_cache[name]
-            else:
-                xls = pd.ExcelFile(path)
-                sheets = {}
-                for sheet in xls.sheet_names:
-                    if pl:
-                        try:
-                            sheets[sheet] = pl.read_excel(path, sheet_name=sheet).to_pandas()
-                        except Exception:
-                            sheets[sheet] = xls.parse(sheet)
-                    else:
-                        sheets[sheet] = xls.parse(sheet)
-                _table_cache[name] = sheets
-            local_vars.update(sheets)
-        elif suffix == '.parquet':
-            if name in _table_cache:
-                local_vars['df'] = _table_cache[name]
-            else:
-                try:
-                    if pl:
-                        try:
-                            df = pl.scan_parquet(path).collect().to_pandas()
-                        except Exception:
-                            df = pd.read_parquet(path)
-                    else:
-                        df = pd.read_parquet(path)
-                except Exception as e:
-                    return f'Ошибка чтения parquet: {e}'
-                _table_cache[name] = df
-                local_vars['df'] = df
-        else:
-            return f'Неподдерживаемый тип файла: {path.suffix}'
-
-        exec(code, {'pd': pd}, local_vars)
+        exec(
+            code,
+            {'pd': pd, 'load_table': load_table, 'get_table_path': get_table_path},
+            local_vars,
+        )
         result = local_vars.get('result')
         if isinstance(result, pd.DataFrame):
             if max_output_rows is not None and len(result) > max_output_rows:
@@ -394,7 +387,7 @@ def execute_pandas_code(
                 )
                 return f"{head}\n... ({len(result) - max_output_rows} more rows)"
             return _truncate_frame(result, cell_limit).to_csv(index=False)
-        return str(result) if result is not None else 'Нет результата'
+        return str(result) if result is not None else 'Нет результата; обязательно сохраните ответ в переменную result и выведите print(result)'
     except Exception as e:
         return f'Ошибка выполнения кода: {e}'
 

@@ -7,6 +7,9 @@ from modules import shared
 from modules.block_requests import OpenMonkeyPatch, RequestBlocker
 from modules.logging_colors import logger
 
+# Always launch in instruct mode regardless of saved settings
+shared.settings['mode'] = 'instruct'
+
 # Set up Gradio temp directory path
 gradio_temp_path = Path('user_data') / 'cache' / 'gradio'
 shutil.rmtree(gradio_temp_path, ignore_errors=True)
@@ -44,6 +47,8 @@ import yaml
 
 import modules.extensions as extensions_module
 from modules import (
+    chat,
+    login,
     training,
     ui,
     ui_chat,
@@ -53,11 +58,9 @@ from modules import (
     ui_notebook,
     ui_parameters,
     ui_session,
-    utils
+    utils,
 )
-from modules.chat import generate_pfp_cache
 from modules.extensions import apply_extensions
-from modules import login
 from modules.LoRA import add_lora_to_model
 from modules.models import load_model, unload_model_if_idle
 from modules.models_settings import (
@@ -118,7 +121,7 @@ def create_interface():
 
     # Regenerate for default character
     if shared.settings['mode'] != 'instruct':
-        generate_pfp_cache(shared.settings['character'])
+        chat.generate_pfp_cache(shared.settings['character'])
 
     # css/js strings
     css = ui.css
@@ -134,6 +137,14 @@ def create_interface():
         login_block = gr.Column(visible=True)
         interface_block = gr.Column(visible=False)
         login.create_login_ui(login_block, interface_block)
+
+        # Restore previously authenticated sessions using the browser cookie
+        shared.gradio['interface'].load(
+        login.restore_login,
+        None,
+        [login_block, interface_block, shared.gradio['user']],
+        show_progress=False,
+    )
 
         with interface_block:
             # Interface state
@@ -211,6 +222,23 @@ def create_interface():
             )
 
             shared.gradio['interface'].load(partial(ui.apply_interface_values, {}, use_persistent=True), None, gradio(ui.list_interface_input_elements()), show_progress=False)
+
+            shared.gradio['interface'].load(
+                ui.gather_interface_values,
+                gradio(shared.input_elements),
+                gradio('interface_state'),
+                show_progress=False,
+            ).then(
+                chat.handle_character_menu_change,
+                gradio('interface_state'),
+                gradio('history', 'display', 'name1', 'name2', 'character_picture', 'greeting', 'context', 'unique_id'),
+                show_progress=False,
+            ).then(
+                None,
+                None,
+                None,
+                js=f'() => {{{ui.update_big_picture_js}; updateBigPicture()}}',
+            )
 
             extensions_module.create_extensions_tabs()  # Extensions tabs
             extensions_module.create_extensions_block()  # Extensions block

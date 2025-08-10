@@ -275,6 +275,7 @@ def list_interface_input_elements():
         'show_two_notebook_columns',
         'paste_to_attachment',
         'include_past_attachments',
+        'user',
     ]
 
     return elements
@@ -289,11 +290,14 @@ def gather_interface_values(*args, request: gr.Request | None = None):
 
     # Associate the current username with this interface state so that
     # multiple users do not mix their chats/files.
-    try:
-        from modules import login
-        output['user'] = login.get_session_user(request)
-    except Exception:
-        output['user'] = 'anonymous'
+    if request is not None:
+        try:
+            from modules import login
+            output['user'] = login.get_session_user(request)
+        except Exception:
+            pass
+
+    output['user'] = output.get('user', 'anonymous')
 
     if not shared.args.multi_user:
         shared.persistent_interface_state = output
