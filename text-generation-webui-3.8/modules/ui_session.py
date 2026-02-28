@@ -1,6 +1,6 @@
 import gradio as gr
 
-from modules import shared, ui, utils
+from modules import shared, ui, utils, login
 from modules.utils import gradio
 
 
@@ -17,7 +17,7 @@ def create_ui():
 
             with gr.Column():
                 gr.Markdown("## Extensions & flags")
-                shared.gradio['save_settings'] = gr.Button('Save extensions settings to user_data/settings.yaml', elem_classes='refresh-button', interactive=not mu)
+                shared.gradio['save_settings'] = gr.Button('Save extensions settings', elem_classes='refresh-button', interactive=not mu)
                 shared.gradio['reset_interface'] = gr.Button("Apply flags/extensions and restart", interactive=not mu)
                 with gr.Row():
                     with gr.Column():
@@ -51,10 +51,11 @@ def create_ui():
 
 def handle_save_settings(state, preset, extensions, show_controls, theme):
     contents = ui.save_settings(state, preset, extensions, show_controls, theme, manual_save=True)
+    path = login.get_user_settings_path()
     return [
         contents,
-        "settings.yaml",
-        "user_data/",
+        path.name,
+        str(path.parent) + '/',
         gr.update(visible=True)
     ]
 

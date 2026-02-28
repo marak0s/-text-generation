@@ -28,6 +28,8 @@ Its goal is to become the [AUTOMATIC1111/stable-diffusion-webui](https://github.
 - Free-form text generation in the Notebook tab without being limited to chat turns.
 - OpenAI-compatible API with Chat and Completions endpoints, including tool-calling support – see [examples](https://github.com/oobabooga/text-generation-webui/wiki/12-%E2%80%90-OpenAI-API#examples).
 - Extension support, with numerous built-in and user-contributed extensions available. See the [wiki](https://github.com/oobabooga/text-generation-webui/wiki/07-%E2%80%90-Extensions) and [extensions directory](https://github.com/oobabooga/text-generation-webui-extensions) for details.
+- The system prompt can be customized from the **Custom system message** field on the Parameters tab.
+- Python code blocks in chat replies are executed on the server, and uploaded tables can be loaded with `get_table_path('file.csv')`.
 
 ## How to install
 

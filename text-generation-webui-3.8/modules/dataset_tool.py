@@ -1,0 +1,289 @@
+from pathlib import Path
+
+try:  # pragma: no cover - pandas is an optional dependency at runtime
+    import pandas as pd
+except Exception:  # pragma: no cover
+    pd = None
+
+try:
+    import polars as pl
+except Exception:  # pragma: no cover - optional dependency
+    pl = None
+
+_loaded_tables: dict[str, str] = {}
+
+
+def register_table(file_path: str | Path) -> str:
+    """Register a table path and return its name identifier."""
+    path = Path(file_path)
+    name = path.name
+    _loaded_tables[name] = str(path)
+    return name
+
+
+def get_table_path(name: str) -> str | None:
+    """Return the registered path for a table name if available."""
+    return _loaded_tables.get(name)
+
+
+def _truncate_frame(df: "pd.DataFrame", limit: int) -> "pd.DataFrame":
+    """Return a copy of ``df`` with each cell truncated to ``limit`` characters."""
+    if limit:
+        df_str = df.astype(str)
+        truncate = lambda x: x[:limit] + ("..." if len(x) > limit else "")
+        # DataFrame.map was introduced in pandas 2.1 as a replacement for applymap
+        if hasattr(df_str, "map"):
+            return df_str.map(truncate)
+        return df_str.applymap(truncate)
+    return df
+
+
+def summarize_table(file_path: str, max_rows: int = 5, cell_limit: int = 80) -> str:
+    """Return a lightweight textual preview of an Excel, CSV or Parquet table."""
+    if pd is None:
+        return '[pandas not installed]'
+    path = Path(file_path)
+    parts = [f"Table: {path.name}"]
+    suffix = path.suffix.lower()
+
+    if suffix == '.csv':
+        row_count = None
+        df = None
+        if pl:
+            try:
+                scan = pl.scan_csv(path, ignore_errors=True)
+                df = scan.head(max_rows).collect().to_pandas()
+                uniq_df = (
+                    scan.select([pl.col(c).n_unique().alias(str(c)) for c in df.columns])
+                    .collect()
+                    .to_pandas()
+                )
+                uniques = {col: int(uniq_df.iloc[0][col]) for col in uniq_df.columns}
+            except Exception:  # pragma: no cover - fallback to pandas
+                df = None
+                uniques = {}
+        else:
+            uniques = {}
+        if df is None:
+            df = pd.read_csv(path, nrows=max_rows, dtype=str)
+            try:
+                uniques = (
+                    pd.read_csv(path, dtype=str, usecols=df.columns)
+                    .nunique(dropna=False)
+                    .to_dict()
+                )
+            except Exception:
+                uniques = {}
+        try:
+            with open(path, 'r', encoding='utf-8', errors='ignore') as fh:
+                row_count = sum(1 for _ in fh) - 1
+        except Exception:
+            row_count = None
+        df = _truncate_frame(df, cell_limit)
+        columns = ', '.join(str(c) for c in df.columns)
+        parts.append(f"Columns: {columns}")
+        parts.append(df.to_csv(index=False))
+        if row_count is not None:
+            parts.append(f"Rows: {row_count}")
+        if uniques:
+            parts.append(
+                "Unique values: " + ", ".join(f"{k}={v}" for k, v in uniques.items())
+            )
+        parts.append(
+            f"Use get_table_path('{path.name}') to load this table in Python. "
+            "Enclose analysis in ```python``` blocks to execute it. "
+            f"Preview limited to {max_rows} rows and {cell_limit} chars per cell."
+        )
+        return "\n".join(parts)
+
+    if suffix in {'.xls', '.xlsx'}:
+        xls = pd.ExcelFile(path)
+        try:
+            from openpyxl import load_workbook
+            wb = load_workbook(path, read_only=True, data_only=True)
+        except Exception:  # pragma: no cover - optional dependency
+            wb = None
+        for sheet in xls.sheet_names:
+            row_count = None
+            uniques = {}
+            if pl:
+                try:
+                    full = pl.read_excel(path, sheet_name=sheet)
+                    row_count = full.height
+                    pdf = full.head(max_rows).to_pandas()
+                    uniq_df = full.select(pl.all().n_unique()).to_pandas()
+                    uniques = {col: int(uniq_df.iloc[0][col]) for col in uniq_df.columns}
+                except Exception:  # pragma: no cover - fallback to pandas
+                    pdf = None
+            else:
+                pdf = None
+            if pdf is None:
+                full_pd = xls.parse(sheet)
+                row_count = len(full_pd)
+                pdf = full_pd.head(max_rows)
+                try:
+                    uniques = full_pd.nunique(dropna=False).to_dict()
+                except Exception:
+                    uniques = {}
+            pdf = _truncate_frame(pdf, cell_limit)
+            columns = ', '.join(str(c) for c in pdf.columns)
+            if row_count is not None:
+                parts.append(f"Sheet: {sheet} ({row_count} rows)")
+            else:
+                parts.append(f"Sheet: {sheet}")
+            parts.append(f"Columns: {columns}")
+            parts.append(pdf.to_csv(index=False))
+            if uniques:
+                parts.append(
+                    "Unique values: " + ", ".join(f"{k}={v}" for k, v in uniques.items())
+                )
+        parts.append(
+            f"Use get_table_path('{path.name}') to load this table in Python. "
+            "Enclose analysis in ```python``` blocks to execute it. "
+            f"Preview limited to {max_rows} rows and {cell_limit} chars per cell."
+        )
+        return "\n".join(parts)
+
+    if suffix == '.parquet':
+        try:
+            import pyarrow.parquet as pq  # type: ignore
+        except Exception:  # pragma: no cover
+            pq = None
+        try:
+            row_count = None
+            df = None
+            if pq is not None:
+                try:
+                    row_count = pq.ParquetFile(path).metadata.num_rows
+                except Exception:
+                    row_count = None
+            uniques = {}
+            if pl:
+                try:
+                    scan = pl.scan_parquet(path)
+                    df = scan.head(max_rows).collect().to_pandas()
+                    uniq_df = scan.select(
+                        [pl.col(c).n_unique().alias(str(c)) for c in df.columns]
+                    ).collect().to_pandas()
+                    uniques = {col: int(uniq_df.iloc[0][col]) for col in uniq_df.columns}
+                except Exception:
+                    df = None
+            else:
+                df = None
+            if df is None:
+                df = pd.read_parquet(path)
+                if row_count is None:
+                    row_count = len(df)
+                if max_rows:
+                    df = df.head(max_rows)
+                try:
+                    uniques = pd.read_parquet(path).nunique(dropna=False).to_dict()
+                except Exception:
+                    uniques = {}
+            df = _truncate_frame(df, cell_limit)
+            columns = ', '.join(str(c) for c in df.columns)
+            parts.append(f"Columns: {columns}")
+            parts.append(df.to_csv(index=False))
+            if row_count is not None:
+                parts.append(f"Rows: {row_count}")
+            if uniques:
+                parts.append(
+                    "Unique values: " + ", ".join(f"{k}={v}" for k, v in uniques.items())
+                )
+            parts.append(
+                f"Use get_table_path('{path.name}') to load this table in Python. "
+                "Enclose analysis in ```python``` blocks to execute it. "
+                f"Preview limited to {max_rows} rows and {cell_limit} chars per cell."
+            )
+            return "\n".join(parts)
+        except Exception as e:
+            return f"[Error reading parquet: {e}]"
+
+    raise ValueError('Unsupported file type: %s' % path.suffix)
+
+
+def answer_question_with_pandas(question: str, file_path: str | Path) -> str:
+    """Return a prompt for an LLM to generate pandas code."""
+    if pd is None:
+        raise RuntimeError('pandas is required for table questions')
+    table_name = register_table(file_path)
+    summary = summarize_table(file_path)
+    prompt = (
+        f"Table `{table_name}` preview:\n{summary}\n\n"
+        f"Question: {question}\n"
+        "Write pandas code to answer the question. "
+        "Store the answer in the variable `result`."
+    )
+    return prompt
+
+
+def execute_pandas_code(
+    code: str,
+    file_path: str | Path | None,
+    max_output_rows: int | None = 20,
+    cell_limit: int = 80,
+) -> str:
+    """Execute pandas code against the provided table and return the result."""
+    if pd is None:
+        return 'pandas is required'
+    if not file_path:
+        return 'No file path provided'
+    path = Path(file_path)
+    if not path.exists():
+        return f'File not found: {path}'
+    suffix = path.suffix.lower()
+    local_vars = {}
+
+    try:
+        if suffix == '.csv':
+            if pl:
+                try:
+                    local_vars['df'] = pl.scan_csv(path, ignore_errors=True).collect().to_pandas()
+                except Exception:
+                    local_vars['df'] = pd.read_csv(path)
+            else:
+                local_vars['df'] = pd.read_csv(path)
+        elif suffix in {'.xls', '.xlsx'}:
+            xls = pd.ExcelFile(path)
+            for sheet in xls.sheet_names:
+                if pl:
+                    try:
+                        local_vars[sheet] = pl.read_excel(path, sheet_name=sheet).to_pandas()
+                    except Exception:
+                        local_vars[sheet] = xls.parse(sheet)
+                else:
+                    local_vars[sheet] = xls.parse(sheet)
+        elif suffix == '.parquet':
+            try:
+                if pl:
+                    try:
+                        local_vars['df'] = pl.scan_parquet(path).collect().to_pandas()
+                    except Exception:
+                        local_vars['df'] = pd.read_parquet(path)
+                else:
+                    local_vars['df'] = pd.read_parquet(path)
+            except Exception as e:
+                return f'Error reading parquet: {e}'
+        else:
+            return f'Unsupported file type: {path.suffix}'
+
+        exec(code, {'pd': pd}, local_vars)
+        result = local_vars.get('result')
+        if isinstance(result, pd.DataFrame):
+            if max_output_rows is not None and len(result) > max_output_rows:
+                head = _truncate_frame(result.head(max_output_rows), cell_limit).to_csv(
+                    index=False
+                )
+                return f"{head}\n... ({len(result) - max_output_rows} more rows)"
+            return _truncate_frame(result, cell_limit).to_csv(index=False)
+        return str(result) if result is not None else 'No result'
+    except Exception as e:
+        return f'Error executing code: {e}'
+
+
+def execute_pandas_code_by_name(code: str, table_name: str) -> str:
+    """Execute code using a previously registered table name."""
+    path = get_table_path(table_name)
+    if not path:
+        return f'Unknown table: {table_name}'
+    return execute_pandas_code(code, path)
